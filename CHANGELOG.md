@@ -2,6 +2,11 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.7.4
+
+- A softer chat info panel: smaller header, round action buttons, a lighter tab bar
+- Shared photos without an embedded thumbnail now show in the media grid
+
 ## 0.7.3
 
 - Settings reorganised: shorter panes, a new Chats pane for message and chat-list options, Appearance reduced to the theme and background

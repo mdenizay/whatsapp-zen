@@ -368,16 +368,16 @@ struct ChatInfoSheet: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .padding(.horizontal, 20)
-            .padding(.bottom, 10)
-            Divider()
+            .controlSize(.small)
+            .frame(width: 280)
+            .padding(.bottom, 8)
             shared
         }
-        .frame(width: 520, height: 640)
+        .frame(width: 440, height: 580)
         .overlay(alignment: .topTrailing) {
             Button { dismiss() } label: {
-                Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.secondary)
-                    .frame(width: 26, height: 26).background(.quaternary, in: Circle())
+                Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22).background(.quaternary.opacity(0.7), in: Circle())
             }
             .buttonStyle(.plain)
             .keyboardShortcut(.cancelAction)
@@ -394,21 +394,22 @@ struct ChatInfoSheet: View {
 
     private var header: some View {
         VStack(spacing: 6) {
-            AvatarView(jid: chat.jid, name: chat.name, size: 92, tick: store.avatarTick)
-            Text(chat.name).font(.title2.weight(.semibold)).lineLimit(1)
+            AvatarView(jid: chat.jid, name: chat.name, size: 72, tick: store.avatarTick)
+                .padding(.bottom, 4)
+            Text(chat.name).font(.title3.weight(.semibold)).lineLimit(1)
             if !chat.isGroup {
-                Text("+" + (chat.jid.split(separator: "@").first ?? "")).foregroundStyle(.secondary).textSelection(.enabled)
+                Text("+" + (chat.jid.split(separator: "@").first ?? "")).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
             }
             if let about = info?.about, !about.isEmpty {
-                Text(about).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(2)
+                Text(about).font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center).lineLimit(2)
             }
         }
-        .padding(.top, 26)
+        .padding(.top, 24)
         .padding(.horizontal, 30)
     }
 
     private var actions: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 18) {
             Menu {
                 if current.muted {
                     Button(L("Unmute")) { store.mute(current, seconds: 0) }
@@ -462,8 +463,7 @@ struct ChatInfoSheet: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 18)
+        .padding(.vertical, 16)
     }
 
     @ViewBuilder private var shared: some View {
@@ -480,7 +480,7 @@ struct ChatInfoSheet: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if kind == "media" {
             ScrollView {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 4), spacing: 3) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 4), spacing: 4) {
                     ForEach(items) { item in
                         MediaTile(message: item) {
                             // Photos and videos open in the viewer, over the chat.
@@ -490,7 +490,8 @@ struct ChatInfoSheet: View {
                             .contextMenu { Button(L("Show in Chat"), systemImage: "bubble.left") { reveal(item) } }
                     }
                 }
-                .padding(12)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
             }
         } else {
             ScrollView {
@@ -499,7 +500,7 @@ struct ChatInfoSheet: View {
                         SharedRow(message: item, isLink: kind == "links",
                                   who: item.fromMe ? L("You") : (item.senderName.isEmpty ? chat.name : item.senderName),
                                   open: { kind == "links" ? openLink(item) : open(item) }, reveal: { reveal(item) })
-                        Divider().padding(.leading, 62)
+                        if item.id != items.last?.id { Divider().padding(.leading, 62).opacity(0.5) }
                     }
                 }
                 .padding(.vertical, 6)
@@ -528,24 +529,29 @@ struct ChatInfoSheet: View {
     }
 }
 
-/// One of the round-cornered action buttons under the header.
+/// One of the actions under the header: a soft round icon with a caption.
 private struct InfoTile: View {
     let title: String
     let icon: String
     let active: Bool
     var danger = false
 
+    @State private var hovering = false
+
+    private var tint: Color { danger ? .red : Theme.accent }
+
     var body: some View {
         VStack(spacing: 5) {
-            Image(systemName: icon).font(.system(size: 17, weight: .medium))
-            Text(title).font(.caption).lineLimit(1).minimumScaleFactor(0.8)
+            Image(systemName: icon).font(.system(size: 14, weight: .medium))
+                .foregroundStyle(active ? AnyShapeStyle(.white) : AnyShapeStyle(tint))
+                .frame(width: 38, height: 38)
+                .background(active ? AnyShapeStyle(tint) : AnyShapeStyle(tint.opacity(hovering ? 0.2 : 0.12)), in: Circle())
+            Text(title).font(.caption2).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
         }
-        .foregroundStyle(danger ? AnyShapeStyle(.red) : (active ? AnyShapeStyle(.white) : AnyShapeStyle(Theme.accent)))
-        .frame(maxWidth: .infinity)
-        .frame(height: 58)
-        .background(active && !danger ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.quaternary.opacity(0.7)),
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .frame(width: 62)
         .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
     }
 }
 
@@ -629,26 +635,38 @@ private struct MediaTile: View {
     let message: Message
     let pick: () -> Void
 
+    @State private var image: NSImage?
+
     var body: some View {
         Button(action: pick) {
             Color.clear
                 .aspectRatio(1, contentMode: .fit)
                 .overlay {
-                    if let image = Images.thumbnail(base64: message.thumb) {
+                    if let image {
                         Image(nsImage: image).resizable().scaledToFill()
                     } else {
-                        Rectangle().fill(.quaternary)
+                        Rectangle().fill(.quaternary.opacity(0.6))
+                        Image(systemName: message.type == "video" ? "video" : "photo").foregroundStyle(.tertiary)
                     }
                 }
                 .overlay {
-                    if message.type == "video" {
-                        Image(systemName: "play.fill").font(.title3).foregroundStyle(.white).shadow(radius: 3)
+                    if message.type == "video", image != nil {
+                        Image(systemName: "play.fill").font(.callout).foregroundStyle(.white).shadow(radius: 3)
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .task(id: message.id) {
+            // Not every message carries an embedded thumbnail; a photo already
+            // on disk can stand in for it.
+            if let thumb = Images.thumbnail(base64: message.thumb) {
+                image = thumb
+            } else if message.type == "image", let path = message.mediaPath, !path.isEmpty {
+                image = await Images.load(path: path, maxPixel: 200)
+            }
+        }
     }
 }
 
