@@ -60,6 +60,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         model.start()
         Updater.shared.start()
+        // Freed memory lingers in the allocator as "used". Hand it back every
+        // minute, and drop decoded pictures once the app is out of sight.
+        Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in malloc_zone_pressure_relief(nil, 0) }
         showWindow()
         snapshotIfRequested()
     }
@@ -76,7 +79,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         Notifier.shared.refresh()
     }
 
-    func applicationDidResignActive(_ notification: Notification) { model.appActiveChanged() }
+    func applicationDidResignActive(_ notification: Notification) {
+        model.appActiveChanged()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) {
+            if !NSApp.isActive { Images.trim() }
+        }
+    }
 
     // MARK: Main window
 

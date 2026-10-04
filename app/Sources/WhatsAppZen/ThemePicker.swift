@@ -73,6 +73,8 @@ struct ThemePicker: View {
             HStack(spacing: 10) {
                 Image(systemName: "circle.lefthalf.filled").foregroundStyle(.secondary)
                 Slider(value: $prefs.themeIntensity, in: 0.05...0.6)
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity)
                     .onChange(of: prefs.themeIntensity) { _, _ in prefs.wallpaper = "theme" }
             }
             .help(L("How strongly the colours tint the window"))
@@ -131,9 +133,10 @@ struct ThemePicker: View {
                         .frame(width: index == 0 ? 34 : 22, height: index == 0 ? 34 : 22)
                         .overlay(Circle().strokeBorder(.white, lineWidth: 3))
                         .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
-                        .position(x: point.x * size.width, y: 34 + point.y * (size.height - 68))
+                        // Kept a little inside the field so a dot at the edge stays whole.
+                        .position(x: 20 + point.x * (size.width - 40), y: 34 + point.y * (size.height - 68))
                         .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                            move(index, to: CGPoint(x: value.location.x / size.width,
+                            move(index, to: CGPoint(x: (value.location.x - 20) / (size.width - 40),
                                                     y: (value.location.y - 34) / (size.height - 68)))
                         })
                 }

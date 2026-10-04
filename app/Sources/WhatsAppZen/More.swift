@@ -753,57 +753,23 @@ struct ReleaseNotesSheet: View {
 
 // MARK: Settings panes
 
+/// Colours and background. Everything about how messages and the chat list
+/// are laid out lives in ChatSettings.
 struct AppearanceSettings: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject private var prefs = Prefs.shared
 
-    private var customColor: Binding<Color> {
-        Binding {
-            Color(light: UInt32(prefs.customAccent), dark: UInt32(prefs.customAccent))
-        } set: { color in
-            guard let rgb = NSColor(color).usingColorSpace(.sRGB) else { return }
-            prefs.customAccent = Int(rgb.redComponent * 255) << 16 | Int(rgb.greenComponent * 255) << 8 | Int(rgb.blueComponent * 255)
-            prefs.accent = "custom"
-        }
-    }
-
     var body: some View {
         Form {
             Section {
-                Toggle(L("A separate look for %@", model.active?.label ?? ""),
-                       isOn: Binding(get: { prefs.ownLook }, set: { prefs.setOwnLook($0) }))
-            } footer: {
-                Text(prefs.ownLook
-                    ? L("Theme, colours, background and message style below apply to this account only.")
-                    : L("All accounts share one look. Turn this on to style this account differently."))
-            }
-            Section(L("Theme")) {
                 ThemePicker().padding(.vertical, 4)
             }
-            Section(L("Accent Color")) {
-                HStack(spacing: 10) {
-                    ForEach(Prefs.accents, id: \.id) { entry in
-                        Button { prefs.accent = entry.id } label: {
-                            Circle().fill(Color(light: entry.light, dark: entry.dark)).frame(width: 24, height: 24)
-                                .overlay(Circle().strokeBorder(.primary, lineWidth: prefs.accent == entry.id ? 2 : 0).padding(-3))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    Spacer()
-                    ColorPicker(L("Custom"), selection: customColor, supportsOpacity: false)
-                }
-                .padding(.vertical, 4)
-            }
-            Section(L("Chat Background")) {
+            Section {
                 Picker(L("Background"), selection: $prefs.wallpaper) {
-                    Text(L("Plain")).tag("none")
                     Text(L("Theme")).tag("theme")
-                    Text(L("Tint")).tag("tint")
-                    Text(L("Gradient")).tag("gradient")
+                    Text(L("Plain")).tag("none")
                     Text(L("Picture")).tag("image")
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
                 if prefs.wallpaper == "image" {
                     HStack {
                         Text(prefs.wallpaperPath.isEmpty ? L("No picture chosen") : (prefs.wallpaperPath as NSString).lastPathComponent)
@@ -821,6 +787,27 @@ struct AppearanceSettings: View {
                     }
                 }
             }
+            if model.accounts.count > 1 {
+                Section {
+                    Toggle(L("A separate look for %@", model.active?.label ?? ""),
+                           isOn: Binding(get: { prefs.ownLook }, set: { prefs.setOwnLook($0) }))
+                } footer: {
+                    Text(prefs.ownLook
+                        ? L("Theme, colours, background and message style below apply to this account only.")
+                        : L("All accounts share one look. Turn this on to style this account differently."))
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+/// How messages and the chat list look and behave.
+struct ChatSettings: View {
+    @ObservedObject private var prefs = Prefs.shared
+
+    var body: some View {
+        Form {
             Section(L("Messages")) {
                 HStack {
                     Text(L("Text Size"))
@@ -838,6 +825,9 @@ struct AppearanceSettings: View {
                     Slider(value: $prefs.bubbleRadius, in: 4...22, step: 1)
                 }
                 Toggle(L("12-hour clock"), isOn: $prefs.hour12)
+            }
+            Section(L("Writing")) {
+                Toggle(L("Turn emoticons like :) into emoji"), isOn: $prefs.emoticons)
                 HStack {
                     Text(L("Quick Reactions"))
                     TextField(L("Quick Reactions"), text: $prefs.reactions).labelsHidden().multilineTextAlignment(.trailing)
@@ -851,9 +841,6 @@ struct AppearanceSettings: View {
                 }
                 .disabled(prefs.compact)
                 Toggle(L("Square profile photos"), isOn: $prefs.squareAvatars)
-            }
-            Section(L("Menu Bar")) {
-                Toggle(L("Show unread count in the menu bar"), isOn: $prefs.menuBarCount)
             }
         }
         .formStyle(.grouped)

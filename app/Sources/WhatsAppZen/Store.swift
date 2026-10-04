@@ -93,6 +93,9 @@ final class AppStore: ObservableObject, Identifiable {
     /// Fires with a chat JID whenever that chat's messages changed ("" = any).
     let messagesChanged = PassthroughSubject<String, Never>()
 
+    private var lastChats = Data()
+    private var lastMessages = Data()
+    private var lastMessagesKey = ""
     private var chatsReload: DispatchWorkItem?
     private var messagesReload: DispatchWorkItem?
     private var typingExpiry: [String: DispatchWorkItem] = [:]
@@ -226,7 +229,11 @@ final class AppStore: ObservableObject, Identifiable {
     func reloadChats() {
         guard !Self.isDemo else { return }
         Task { @MainActor in
-            guard let list: [Chat] = try? await Core.call("chats", account: self.id) else { return }
+            // Most reloads bring back exactly what is already on screen; spot
+            // that on the raw reply and skip decoding 600 chats for nothing.
+            guard let data = try? await Core.reply("chats", account: self.id), data != self.lastChats,
+                  let list: [Chat] = try? Core.decode(data) else { return }
+            self.lastChats = data
             if list != self.chats { self.chats = list }
         }
     }
@@ -239,7 +246,17 @@ final class AppStore: ObservableObject, Identifiable {
             args["before_ts"] = before.ts
             args["before_id"] = before.id
         }
-        return try? await Core.call("messages", args, account: self.id)
+        guard let data = try? await Core.reply("messages", args, account: self.id) else { return nil }
+        // The open conversation is re-read after every receipt; an unchanged
+        // reply is answered with what is already loaded.
+        let key = "\(chat)#\(limit)"
+        if before == nil, chat == selected, key == lastMessagesKey, data == lastMessages, !messages.isEmpty { return messages }
+        guard let list: [Message] = try? Core.decode(data) else { return nil }
+        if before == nil, chat == selected {
+            lastMessagesKey = key
+            lastMessages = data
+        }
+        return list
     }
 
     /// Receipts and reactions arrive in bursts; redraw the conversation once.
@@ -283,11 +300,15 @@ final class AppStore: ObservableObject, Identifiable {
     func open(_ jid: String?) {
         guard jid != selected else { return }
         selected = jid
+        lastMessagesKey = ""
+        lastMessages = Data()
         messages = []
         pinnedMessages = []
         hasMore = false
         clearDraftState()
         unreadFrom = nil
+        // Leaving a chat frees what it had decoded.
+        malloc_zone_pressure_relief(nil, 0)
         guard let jid else { return }
         unreadAtOpen = chats.first { $0.jid == jid }?.unread ?? 0
         if let chat = chats.first(where: { $0.jid == jid }) { loadMembers(of: chat) }

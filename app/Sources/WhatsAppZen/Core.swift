@@ -65,6 +65,20 @@ enum Core {
         }
     }
 
+    /// Runs a command and returns its reply undecoded. Callers that poll the
+    /// same data can compare replies and skip the decoding when nothing changed.
+    static func reply(_ cmd: String, _ args: [String: Any] = [:], account: String? = nil) async throws -> Data {
+        let account = account ?? active
+        return try await onQueue { try raw(cmd, args, account) }
+    }
+
+    static func decode<T: Decodable>(_ data: Data) throws -> T {
+        let reply = try decoder.decode(Reply<T>.self, from: data)
+        if let error = reply.error { throw CoreError(message: error) }
+        guard let value = reply.data else { throw CoreError(message: "empty reply") }
+        return value
+    }
+
     /// Runs a command whose result does not matter.
     static func run(_ cmd: String, _ args: [String: Any] = [:], account: String? = nil) async throws {
         let account = account ?? active

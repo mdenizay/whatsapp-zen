@@ -2,6 +2,11 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.7.3
+
+- Settings reorganised: shorter panes, a new Chats pane for message and chat-list options, Appearance reduced to the theme and background
+- Lower memory use: unchanged chat and message data is no longer decoded again, full-size pictures are not kept after the viewer closes, and freed memory is handed back to the system
+
 ## 0.7.2
 
 - The theme is shown from the start, not only once a chat is open

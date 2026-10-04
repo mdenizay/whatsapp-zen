@@ -82,7 +82,7 @@ final class Prefs: ObservableObject {
               let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: wallpaperPath) as CFURL, nil),
               let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                   kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
-                  kCGImageSourceThumbnailMaxPixelSize: 2400,
+                  kCGImageSourceThumbnailMaxPixelSize: 1600,
               ] as CFDictionary) else { return nil }
         let image = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
         wallpaperImage = image

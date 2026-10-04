@@ -143,6 +143,8 @@ struct MediaViewer: View {
     private func close() {
         player?.pause()
         store.viewer = nil
+        // Full-size pictures are the largest things the app ever holds.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { malloc_zone_pressure_relief(nil, 0) }
     }
 
     private func load() async {
@@ -165,7 +167,7 @@ struct MediaViewer: View {
             let player = AVPlayer(url: URL(fileURLWithPath: file))
             self.player = player
             player.play()
-        } else if let full = await Images.load(path: file, maxPixel: 2600) {
+        } else if let full = await Images.loadUncached(path: file, maxPixel: 2000) {
             image = full
         } else {
             failed = true

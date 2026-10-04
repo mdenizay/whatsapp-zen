@@ -14,77 +14,105 @@ enum Links {
 }
 
 /// Settings, shown as a sheet on the main window (⌘, or the sidebar gear).
+/// One short pane per subject, picked from a list at the side.
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
-    @State private var pane = Pane.general
+    /// WA_PANE=<index> (demo snapshots) starts on that pane.
+    @State private var pane = Pane.allCases[min(Int(ProcessInfo.processInfo.environment["WA_PANE"] ?? "") ?? 0, Pane.allCases.count - 1)]
 
     private enum Pane: CaseIterable {
-        case general, appearance, notifications, privacy, storage, accounts, about
-
-        var icon: String {
-            switch self {
-            case .general: return "gearshape"
-            case .appearance: return "paintpalette"
-            case .notifications: return "bell.badge"
-            case .privacy: return "lock"
-            case .storage: return "internaldrive"
-            case .accounts: return "person.2"
-            case .about: return "info.circle"
-            }
-        }
+        case general, appearance, chats, notifications, privacy, storage, accounts, about
 
         var title: String {
             switch self {
             case .general: return L("General")
             case .appearance: return L("Appearance")
+            case .chats: return L("Chats")
+            case .notifications: return L("Notifications")
             case .privacy: return L("Privacy")
             case .storage: return L("Storage")
-            case .notifications: return L("Notifications")
             case .accounts: return L("Accounts")
             case .about: return L("About")
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .general: return "gearshape.fill"
+            case .appearance: return "paintpalette.fill"
+            case .chats: return "bubble.left.and.bubble.right.fill"
+            case .notifications: return "bell.badge.fill"
+            case .privacy: return "lock.fill"
+            case .storage: return "internaldrive.fill"
+            case .accounts: return "person.2.fill"
+            case .about: return "info.circle.fill"
+            }
+        }
+
+        var color: Color {
+            switch self {
+            case .general: return Color(light: 0x8E8E93, dark: 0x98989D)
+            case .appearance: return Color(light: 0x8E5BE8, dark: 0xA982F5)
+            case .chats: return Color(light: 0x1DAA61, dark: 0x25C46B)
+            case .notifications: return Color(light: 0xEB5757, dark: 0xF07C7C)
+            case .privacy: return Color(light: 0x2F80ED, dark: 0x5A9DF5)
+            case .storage: return Color(light: 0xF2994A, dark: 0xF5AD6E)
+            case .accounts: return Color(light: 0x00A3A3, dark: 0x2CC7C7)
+            case .about: return Color(light: 0x8E8E93, dark: 0x98989D)
             }
         }
     }
 
     var body: some View {
         HStack(spacing: 0) {
-            // Panes down the side: seven of them do not fit across the top.
             VStack(alignment: .leading, spacing: 2) {
-                Text(L("Settings")).font(.headline).padding(.horizontal, 10).padding(.bottom, 8)
                 ForEach(Pane.allCases, id: \.self) { item in
                     Button { pane = item } label: {
-                        Label(item.title, systemImage: item.icon)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 10).padding(.vertical, 6)
-                            .background(pane == item ? AnyShapeStyle(Theme.accent.opacity(0.18)) : AnyShapeStyle(.clear),
-                                        in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            .contentShape(Rectangle())
+                        HStack(spacing: 9) {
+                            Image(systemName: item.icon).font(.system(size: 11, weight: .semibold)).foregroundStyle(.white)
+                                .frame(width: 22, height: 22)
+                                .background(item.color.gradient, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            Text(item.title)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 5)
+                        .background(pane == item ? AnyShapeStyle(.primary.opacity(0.1)) : AnyShapeStyle(.clear),
+                                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
                 Spacer()
-                Button(L("Done")) { model.showingSettings = false }
-                    .keyboardShortcut(.defaultAction)
-                    .padding(.horizontal, 10)
             }
-            .padding(.vertical, 16)
-            .padding(.horizontal, 8)
-            .frame(width: 170)
-            .background(.quaternary.opacity(0.4))
-            Group {
-                switch pane {
-                case .general: GeneralSettings()
-                case .appearance: AppearanceSettings()
-                case .privacy: PrivacySettings()
-                case .storage: StorageSettings()
-                case .notifications: NotificationSettings()
-                case .accounts: AccountSettings()
-                case .about: AboutSettings()
+            .padding(10)
+            .frame(width: 176)
+            .background(.quaternary.opacity(0.35))
+
+            VStack(spacing: 0) {
+                HStack {
+                    Text(pane.title).font(.title3.weight(.semibold))
+                    Spacer()
+                    Button(L("Done")) { model.showingSettings = false }.keyboardShortcut(.defaultAction)
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
+                .padding(.bottom, 4)
+                Group {
+                    switch pane {
+                    case .general: GeneralSettings()
+                    case .appearance: AppearanceSettings()
+                    case .chats: ChatSettings()
+                    case .notifications: NotificationSettings()
+                    case .privacy: PrivacySettings()
+                    case .storage: StorageSettings()
+                    case .accounts: AccountSettings()
+                    case .about: AboutSettings()
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 600, height: 440)
+        .frame(width: 660, height: 470)
         .tint(Theme.accent)
     }
 }
@@ -126,17 +154,17 @@ private struct GeneralSettings: View {
                 }
             }
             Section {
-                Toggle(L("Turn emoticons like :) into emoji"), isOn: $prefs.emoticons)
+                Toggle(L("Show unread count in the menu bar"), isOn: $prefs.menuBarCount)
+            }
+            Section(L("Language")) {
+                Text(L("The app follows the language set for it in System Settings.")).foregroundStyle(.secondary)
+                Button(L("Open Language Settings…")) { NSWorkspace.shared.open(Links.languageSettings) }
             }
             Section {
                 Button(L("Run Setup Again…")) {
                     model.showingSettings = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { model.showingSetup = true }
                 }
-            }
-            Section(L("Language")) {
-                Text(L("The app follows the language set for it in System Settings.")).foregroundStyle(.secondary)
-                Button(L("Open Language Settings…")) { NSWorkspace.shared.open(Links.languageSettings) }
             }
         }
         .formStyle(.grouped)

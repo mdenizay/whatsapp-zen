@@ -44,6 +44,27 @@ enum Images {
         }
     }
 
+    /// Decodes a file without keeping it: for the full-size viewer, whose
+    /// pictures are far too large to hold on to.
+    static func loadUncached(path: String, maxPixel: CGFloat) async -> NSImage? {
+        await withCheckedContinuation { cont in
+            queue.async {
+                guard let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
+                      let cg = decode(src, maxPixel: maxPixel) else {
+                    cont.resume(returning: nil)
+                    return
+                }
+                cont.resume(returning: image(cg))
+            }
+        }
+    }
+
+    /// Drops every decoded image and hands freed memory back to the system.
+    static func trim() {
+        cache.removeAllObjects()
+        malloc_zone_pressure_relief(nil, 0)
+    }
+
     /// An already decoded image, if it is still in memory. Lets a view that is
     /// rebuilt show its picture at once instead of flashing the placeholder.
     static func cached(path: String, maxPixel: CGFloat) -> NSImage? {
