@@ -2,6 +2,10 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.7.2
+
+- The theme is shown from the start, not only once a chat is open
+
 ## 0.7.1
 
 - Theme picker: the second colour is the opposite of the first, and the two dots move together across the field

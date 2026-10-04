@@ -31,8 +31,21 @@ struct MainView: View {
                                 ChatView(chat: chat)
                             }
                         } else {
-                            ContentUnavailableView(L("Select a chat"), systemImage: "bubble.left.and.bubble.right",
-                                                   description: Text(L("Pick a chat on the left, or start a new one.")))
+                            // The theme belongs to the whole window, not only to an
+                            // open chat. Inside a scroll view because the toolbar is
+                            // see-through only above scrolling content; over anything
+                            // else it draws an opaque strip across the theme.
+                            ScrollView {
+                                ContentUnavailableView(L("Select a chat"), systemImage: "bubble.left.and.bubble.right",
+                                                       description: Text(L("Pick a chat on the left, or start a new one.")))
+                                    .containerRelativeFrame([.horizontal, .vertical])
+                            }
+                            .scrollDisabled(true)
+                            .scrollEdgeEffectStyle(.soft, for: .all)
+                            .background { ChatWallpaper() }
+                            .toolbar(removing: .title)
+                            .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+                            .ignoresSafeArea(.container, edges: .top)
                         }
                     }
                     // A fixed ideal width. Left to itself the conversation asks
