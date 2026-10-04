@@ -24,7 +24,7 @@ struct SettingsView: View {
             AccountSettings().tabItem { Label(L("Accounts"), systemImage: "person.2") }
             AboutSettings().tabItem { Label(L("About"), systemImage: "info.circle") }
         }
-        .frame(width: 480, height: 360)
+        .frame(width: 600, height: 380)
         .tint(Theme.accent)
     }
 }

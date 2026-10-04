@@ -5,6 +5,12 @@ the [whatsmeow](https://github.com/tulir/whatsmeow) protocol library. It links
 to your account as a companion device (like WhatsApp Web) and uses a fraction
 of the memory of the official app.
 
+![The main window: chat list and a conversation](docs/main.png)
+
+| Menu bar: recent chats | Menu bar: reply in place | Settings |
+| --- | --- | --- |
+| ![Recent chats in the menu bar panel](docs/menu-list.png) | ![A conversation in the menu bar panel](docs/menu-chat.png) | ![The Settings window](docs/settings.png) |
+
 > **Unofficial.** This project is not affiliated with, endorsed by, or
 > connected to WhatsApp or Meta. Third-party clients are against WhatsApp's
 > Terms of Service and using one may get your account restricted or banned.
@@ -71,7 +77,9 @@ Data lives in `~/Library/Application Support/WhatsAppZen/`, one folder per
 account. Nothing is sent anywhere except to WhatsApp's own servers.
 
 Running the app with `WA_DEMO=1` shows the interface on made-up data without
-touching any account.
+touching any account. The screenshots above come from that mode: with
+`WA_SNAPSHOT=<folder>` as well, the app writes pictures of its windows there
+and quits, and `tools/frame-screenshot.swift` puts each on a background.
 
 ## Credits and license
 

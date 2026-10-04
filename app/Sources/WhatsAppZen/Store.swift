@@ -91,6 +91,7 @@ final class AppStore: ObservableObject, Identifiable {
     func start() {
         if Self.isDemo {
             state = "connected"
+            me = "15550123@s.whatsapp.net"
             chats = Demo.chats
             presence = Demo.presence
             return

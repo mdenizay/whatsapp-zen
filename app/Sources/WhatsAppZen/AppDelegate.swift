@@ -126,6 +126,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         }
         .environmentObject(model)
+        if ProcessInfo.processInfo.environment["WA_SNAPSHOT"] != nil {
+            // A window captured on its own has nothing behind its glass, which
+            // then renders as flat grey; give snapshots a plain backing.
+            let backing = NSHostingView(rootView: content.background(.background))
+            backing.wantsLayer = true
+            backing.layer?.cornerRadius = 24
+            backing.layer?.masksToBounds = true
+            panel.contentView = backing
+            return
+        }
         let glass = NSGlassEffectView(frame: NSRect(origin: .zero, size: Self.panelSize))
         glass.cornerRadius = 24
         glass.contentView = NSHostingView(rootView: content)
@@ -226,23 +236,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func snapshotIfRequested() {
         guard let dir = ProcessInfo.processInfo.environment["WA_SNAPSHOT"], let store = model.active else { return }
         let out = URL(fileURLWithPath: dir)
+        // The window server's own picture of a window: the real rendering,
+        // glass included. A process may capture its own windows without the
+        // Screen Recording permission. The call is gone from the SDK headers
+        // but still exported, hence the lookup by name.
+        typealias Capture = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
+        let capture = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGWindowListCreateImage").map { unsafeBitCast($0, to: Capture.self) }
         func save(_ view: NSView, _ name: String) {
+            let url = out.appendingPathComponent(name)
+            if let window = view.window, let capture,
+               let image = capture(.null, 1 << 3, UInt32(window.windowNumber), 1 << 0 | 1 << 3)?.takeRetainedValue(),
+               image.width > 1 {
+                try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: url)
+                return
+            }
             guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
             view.cacheDisplay(in: view.bounds, to: rep)
-            try? rep.representation(using: .png, properties: [:])?.write(to: out.appendingPathComponent(name))
+            try? rep.representation(using: .png, properties: [:])?.write(to: url)
         }
         store.open(store.chats.first?.jid)
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [self] in
-            // A key window's content does not come out in cacheDisplay, so step
-            // back first.
-            NSApp.deactivate()
-            RunLoop.current.run(until: Date().addingTimeInterval(1.5))
             if let view = window.contentView?.superview { save(view, "main.png") }
             openPanel()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [self] in
                 if let view = panel.contentView { save(view, "menu.png") }
+                closePanel()
                 showSettings()
-                NSApp.deactivate()
                 RunLoop.current.run(until: Date().addingTimeInterval(1))
                 if let view = settingsWindow?.contentView?.superview { save(view, "settings.png") }
                 NSApp.terminate(nil)
