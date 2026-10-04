@@ -2,6 +2,10 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.6.3
+
+- Each account can have a look of its own: theme, accent colour, chat background, font and bubble style (Settings → Appearance → "A separate look for…"). Switching accounts switches the look.
+
 ## 0.6.2
 
 - Locations are shown as a small map with a pin; click to open in Maps

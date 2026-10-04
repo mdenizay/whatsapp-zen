@@ -328,3 +328,6 @@
 "Photo" = "Fotoğraf";
 "Open in Maps" = "Harita'da Aç";
 "Back" = "Geri";
+"A separate look for %@" = "%@ için ayrı görünüm";
+"Theme, colours, background and message style below apply to this account only." = "Aşağıdaki tema, renkler, arka plan ve mesaj stili yalnızca bu hesap için geçerli.";
+"All accounts share one look. Turn this on to style this account differently." = "Tüm hesaplar aynı görünümü kullanıyor. Bu hesabı farklı tasarlamak için aç.";

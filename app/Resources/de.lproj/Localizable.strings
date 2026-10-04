@@ -328,3 +328,6 @@
 "Photo" = "Foto";
 "Open in Maps" = "In Karten öffnen";
 "Back" = "Zurück";
+"A separate look for %@" = "Eigenes Aussehen für %@";
+"Theme, colours, background and message style below apply to this account only." = "Design, Farben, Hintergrund und Nachrichtenstil unten gelten nur für diesen Account.";
+"All accounts share one look. Turn this on to style this account differently." = "Alle Accounts teilen sich ein Aussehen. Aktiviere dies, um diesen Account anders zu gestalten.";

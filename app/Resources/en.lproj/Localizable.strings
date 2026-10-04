@@ -329,3 +329,6 @@
 "Photo" = "Photo";
 "Open in Maps" = "Open in Maps";
 "Back" = "Back";
+"A separate look for %@" = "A separate look for %@";
+"Theme, colours, background and message style below apply to this account only." = "Theme, colours, background and message style below apply to this account only.";
+"All accounts share one look. Turn this on to style this account differently." = "All accounts share one look. Turn this on to style this account differently.";

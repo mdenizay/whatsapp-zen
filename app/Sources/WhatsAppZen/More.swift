@@ -754,6 +754,7 @@ struct ReleaseNotesSheet: View {
 // MARK: Settings panes
 
 struct AppearanceSettings: View {
+    @EnvironmentObject var model: AppModel
     @ObservedObject private var prefs = Prefs.shared
 
     private var customColor: Binding<Color> {
@@ -768,6 +769,14 @@ struct AppearanceSettings: View {
 
     var body: some View {
         Form {
+            Section {
+                Toggle(L("A separate look for %@", model.active?.label ?? ""),
+                       isOn: Binding(get: { prefs.ownLook }, set: { prefs.setOwnLook($0) }))
+            } footer: {
+                Text(prefs.ownLook
+                    ? L("Theme, colours, background and message style below apply to this account only.")
+                    : L("All accounts share one look. Turn this on to style this account differently."))
+            }
             Section {
                 Picker(L("Theme"), selection: $prefs.appearance) {
                     Text(L("System")).tag("system")

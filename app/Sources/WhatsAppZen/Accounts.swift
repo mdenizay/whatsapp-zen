@@ -107,6 +107,7 @@ final class AppModel: ObservableObject {
         guard accounts.contains(where: { $0.id == id }) else { return }
         activeID = id
         Core.active = id
+        Prefs.shared.activate(account: id)
         UserDefaults.standard.set(id, forKey: "activeAccount")
         accounts.forEach { $0.attentionChanged() }
     }

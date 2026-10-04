@@ -328,3 +328,6 @@
 "Photo" = "Фото";
 "Open in Maps" = "Открыть в Картах";
 "Back" = "Назад";
+"A separate look for %@" = "Отдельное оформление для %@";
+"Theme, colours, background and message style below apply to this account only." = "Тема, цвета, фон и стиль сообщений ниже применяются только к этому аккаунту.";
+"All accounts share one look. Turn this on to style this account differently." = "Все аккаунты используют одно оформление. Включите, чтобы оформить этот аккаунт иначе.";
