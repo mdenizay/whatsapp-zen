@@ -88,6 +88,8 @@ func (a *App) dispatch(r *Req) (any, error) {
 		return a.queryMessages(`chat=? AND pinned=1 AND deleted=0 ORDER BY ts DESC LIMIT 20`, r.Chat)
 	case "search":
 		return a.search(r.Chat, r.Text)
+	case "fetch_history":
+		return a.fetchHistory(r.Chat)
 	case "count_since":
 		var n int
 		err := a.db.QueryRow(`SELECT COUNT(*) FROM messages WHERE chat=? AND ts>=?`, r.Chat, r.TS).Scan(&n)

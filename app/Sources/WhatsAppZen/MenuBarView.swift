@@ -140,6 +140,7 @@ struct MenuChatView: View {
     private var detached: Bool { mode != .panel }
 
     @State private var messages: [Message] = []
+    @State private var loaded = false
     @State private var text = ""
     @State private var reply: Message?
     @State private var editing: Message?
@@ -150,6 +151,7 @@ struct MenuChatView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 2) {
+                        if loaded, messages.isEmpty { NoMessagesNote().padding(.vertical, 40) }
                         MessageList(messages: messages, isGroup: chat.isGroup, maxWidth: bubbleWidth ?? (detached ? 360 : 250), actions: MessageActions(
                             reply: { editing = nil; reply = $0 },
                             edit: { reply = nil; editing = $0; text = $0.text },
@@ -222,7 +224,11 @@ struct MenuChatView: View {
     }
 
     @MainActor private func load() async {
-        if let list = await store.fetchMessages(chat: chat.jid, limit: 40), list != messages { messages = list }
+        guard let list = await store.fetchMessages(chat: chat.jid, limit: 40) else { return }
+        if list != messages { messages = list }
+        loaded = true
+        // Fewer than a page: the rest, if any, is still on the phone.
+        if list.count < 40 { store.requestHistory(of: chat.jid) }
     }
 
     private func send() {

@@ -345,3 +345,7 @@
 "Just right 👌" = "В самый раз 👌";
 "Run Setup Again…" = "Запустить настройку снова…";
 "Writing" = "Ввод";
+"Get older messages from your phone" = "Загрузить старые сообщения с телефона";
+"Asking your phone…" = "Запрос к телефону…";
+"No messages on this Mac yet" = "На этом Mac пока нет сообщений";
+"Messages from before this Mac was linked stay on your phone. New ones will show up here." = "Сообщения, отправленные до привязки этого Mac, остаются на телефоне. Новые появятся здесь.";

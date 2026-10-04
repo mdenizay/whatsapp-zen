@@ -666,3 +666,17 @@ struct DayDivider: View {
             .padding(.vertical, 8)
     }
 }
+
+/// Shown in a chat this Mac holds no messages of.
+struct NoMessagesNote: View {
+    var body: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "iphone.gen3").font(.title2).foregroundStyle(.secondary)
+            Text(L("No messages on this Mac yet")).fontWeight(.medium)
+            Text(L("Messages from before this Mac was linked stay on your phone. New ones will show up here."))
+                .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: 260)
+        .frame(maxWidth: .infinity)
+    }
+}

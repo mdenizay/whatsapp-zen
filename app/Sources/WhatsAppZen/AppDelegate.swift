@@ -265,7 +265,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Any click outside dismisses it: in another app (global) or in one of
         // our own windows (local).
         if let global = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] _ in
-            guard self?.authenticating != true else { return }
+            // Snapshots must not be closed by whatever the user is clicking meanwhile.
+            guard self?.authenticating != true, ProcessInfo.processInfo.environment["WA_SNAPSHOT"] == nil else { return }
             self?.closePanel()
         }) { clickMonitors.append(global) }
         if let local = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] event in

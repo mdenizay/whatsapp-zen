@@ -58,6 +58,10 @@ final class AppStore: ObservableObject, Identifiable {
     @Published var selected: String?
     @Published var messages: [Message] = []
     @Published var hasMore = false
+    /// The open chat's messages have been read from the database at least once.
+    @Published var loaded = false
+    /// The user asked for this chat's older messages from the phone.
+    @Published var askedPhone = false
     @Published var presence: [String: Presence] = [:]
     @Published var typing: [String: String] = [:]
     @Published var replyTo: Message?
@@ -280,10 +284,21 @@ final class AppStore: ObservableObject, Identifiable {
                 self.unreadAtOpen = 0
             }
             self.hasMore = list.count >= limit
+            self.loaded = true
+            if list.count < Self.pageSize { self.requestHistory(of: chat) }
             let pinned: [Message] = Self.isDemo ? list.filter(\.pinned)
                 : ((try? await Core.call("pinned", ["chat": chat], account: self.id)) ?? [])
             if chat == self.selected, pinned != self.pinnedMessages { self.pinnedMessages = pinned }
         }
+    }
+
+    /// Asks the phone for the messages before the oldest one stored here. A
+    /// linked device is only given the recent part of each chat; what comes
+    /// back arrives as a "messages" event. Asking twice for the same page is
+    /// ignored by the core.
+    func requestHistory(of chat: String) {
+        guard !Self.isDemo else { return }
+        Core.fire("fetch_history", ["chat": chat], account: id)
     }
 
     func loadOlder(then done: @escaping () -> Void) {
@@ -303,6 +318,8 @@ final class AppStore: ObservableObject, Identifiable {
         lastMessagesKey = ""
         lastMessages = Data()
         messages = []
+        loaded = false
+        askedPhone = false
         pinnedMessages = []
         hasMore = false
         clearDraftState()

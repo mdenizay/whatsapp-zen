@@ -407,6 +407,19 @@ struct ChatView: View {
                         }
                         .buttonStyle(.glass)
                         .padding(8)
+                    } else if !store.messages.isEmpty {
+                        // Nothing older on this Mac; the phone may have more.
+                        Button(store.askedPhone ? L("Asking your phone…") : L("Get older messages from your phone")) {
+                            store.askedPhone = true
+                            store.requestHistory(of: chat.jid)
+                            // No answer (phone offline, or nothing older): offer it again.
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 20) { store.askedPhone = false }
+                        }
+                        .buttonStyle(.glass)
+                        .disabled(store.askedPhone)
+                        .padding(8)
+                    } else if store.loaded {
+                        NoMessagesNote().padding(.vertical, 40)
                     }
                     MessageList(messages: store.messages, isGroup: chat.isGroup, highlighted: highlighted, unreadFrom: store.unreadFrom, actions: MessageActions(
                         reply: { store.editing = nil; store.replyTo = $0 },

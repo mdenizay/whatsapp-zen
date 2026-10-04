@@ -2,6 +2,12 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.7.8
+
+- Older messages are fetched from your phone: a chat that had only a few messages on this Mac fills in when opened, and "Get older messages from your phone" at the top of a conversation brings more
+- A chat with no messages on this Mac says so instead of opening blank
+- Newly linked accounts receive a year of history
+
 ## 0.7.7
 
 - Opening a chat puts the cursor in the message field again, so you can type straight away

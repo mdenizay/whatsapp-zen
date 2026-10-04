@@ -70,6 +70,11 @@ func newApp(id, dir string) (*App, error) {
 	}
 	store.DeviceProps.Os = proto.String("WhatsApp Zen")
 	store.DeviceProps.PlatformType = waCompanionReg.DeviceProps_DESKTOP.Enum()
+	// Ask the phone for a year of history when linking, not just the last few
+	// weeks: chats that have been quiet for a while would otherwise open empty.
+	store.DeviceProps.RequireFullSync = proto.Bool(true)
+	store.DeviceProps.HistorySyncConfig.FullSyncDaysLimit = proto.Uint32(365)
+	store.DeviceProps.HistorySyncConfig.FullSyncSizeMbLimit = proto.Uint32(512)
 	return &App{
 		id:        id,
 		dir:       dir,
@@ -806,7 +811,8 @@ func (a *App) onHistory(evt *events.HistorySync) {
 				setReaction(tx, cs, r.ID, rs.String(), rx.GetText())
 			}
 		}
-		if n := conv.GetUnreadCount(); n > 0 && n < 10000 {
+		// Older messages fetched on request say nothing about what is unread.
+		if n := conv.GetUnreadCount(); n > 0 && n < 10000 && evt.Data.GetSyncType() != waHistorySync.HistorySync_ON_DEMAND {
 			tx.Exec(`UPDATE chats SET unread=? WHERE jid=?`, n, cs)
 			tx.Exec(`UPDATE messages SET unread=1 WHERE chat=? AND id IN
 				(SELECT id FROM messages WHERE chat=? AND from_me=0 ORDER BY ts DESC LIMIT ?)`, cs, cs, n)
