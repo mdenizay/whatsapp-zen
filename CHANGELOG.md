@@ -2,6 +2,10 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.7.6
+
+- Touch ID now comes up when asked for from the menu bar panel (app lock or a locked chat)
+
 ## 0.7.5
 
 - Pinned and muted chats no longer lose their state after a while (a later history sync was clearing it)

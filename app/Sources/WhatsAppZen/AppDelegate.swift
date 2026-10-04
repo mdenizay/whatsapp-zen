@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var panel: MenuPanel!
     private var clickMonitors: [Any] = []
     private var chatWindows: [String: NSWindow] = [:]
+    private var authenticating = false
     /// The main window's views are dropped while it is closed.
     private var mainContentReleased = false
     private var subscriptions = Set<AnyCancellable>()
@@ -36,6 +37,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self?.showWindow()
         }
         Notifier.shared.setUp()
+
+        // While Touch ID is asked for, the menu bar panel must neither cover
+        // the prompt (it floats above everything) nor take the click on the
+        // prompt for a click outside itself and close.
+        Auth.willPrompt = { [weak self] in
+            self?.authenticating = true
+            self?.panel.level = .normal
+        }
+        Auth.didPrompt = { [weak self] in
+            guard let self else { return }
+            self.panel.level = .popUpMenu
+            if self.panel.isVisible { self.panel.makeKeyAndOrderFront(nil) }
+            // Clicks still in flight from the prompt are not "outside" clicks.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.authenticating = false }
+        }
 
         model.objectWillChange
             .receive(on: DispatchQueue.main)
@@ -249,10 +265,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Any click outside dismisses it: in another app (global) or in one of
         // our own windows (local).
         if let global = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] _ in
+            guard self?.authenticating != true else { return }
             self?.closePanel()
         }) { clickMonitors.append(global) }
         if let local = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] event in
-            guard let self else { return event }
+            guard let self, !self.authenticating else { return event }
             if !self.belongsToPanel(event.window), event.window !== self.statusItem.button?.window { self.closePanel() }
             return event
         }) { clickMonitors.append(local) }

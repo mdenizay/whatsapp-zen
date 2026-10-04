@@ -274,6 +274,11 @@ enum Emoticons {
 
 /// Touch ID (or the account password where there is no sensor).
 enum Auth {
+    /// Called around the system's prompt, so whatever window asked for it can
+    /// get out of the prompt's way and come back afterwards.
+    static var willPrompt: () -> Void = {}
+    static var didPrompt: () -> Void = {}
+
     static func unlock(reason: String, done: @escaping (Bool) -> Void) {
         let context = LAContext()
         var error: NSError?
@@ -281,8 +286,15 @@ enum Auth {
             // No way to authenticate on this Mac: don't lock the user out.
             return done(true)
         }
+        willPrompt()
+        // The prompt belongs to the frontmost app; asked from the menu bar
+        // panel, which does not activate the app, it would never come up.
+        NSApp.activate(ignoringOtherApps: true)
         context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { ok, _ in
-            DispatchQueue.main.async { done(ok) }
+            DispatchQueue.main.async {
+                didPrompt()
+                done(ok)
+            }
         }
     }
 }
