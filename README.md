@@ -44,13 +44,7 @@ Requires macOS 26 or later on Apple silicon.
 brew install --cask mdenizay/tap/whatsapp-zen
 ```
 
-The app is not notarized, so macOS will refuse to open it the first time.
-Either allow it under System Settings → Privacy & Security, or remove the
-quarantine flag:
-
-```bash
-xattr -dr com.apple.quarantine "/Applications/WhatsApp Zen.app"
-```
+The app is signed and notarized, so it opens like any other.
 
 Then open the app and scan the QR code from WhatsApp on your phone
 (Settings → Linked Devices → Link a Device).

@@ -15,9 +15,4 @@ cask "whatsapp-zen" do
   app "WhatsApp Zen.app"
 
   zap trash: "~/Library/Application Support/WhatsAppZen"
-
-  caveats <<~EOS
-    The app is not notarized. If macOS refuses to open it, run:
-      xattr -dr com.apple.quarantine "/Applications/WhatsApp Zen.app"
-  EOS
 end

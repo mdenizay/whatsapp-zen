@@ -18,8 +18,10 @@ ditto -c -k --keepParent "$ROOT/dist/WhatsApp Zen.app" "$ZIP"
 # (xcrun notarytool store-credentials whatsapp-zen ...). The ticket is stapled
 # to the app, so the zip is made again afterwards.
 NOTARIZED=no
-if codesign -dv "$ROOT/dist/WhatsApp Zen.app" 2>&1 | grep -q "Authority=Developer ID Application" \
-    || codesign -dvv "$ROOT/dist/WhatsApp Zen.app" 2>&1 | grep -q "Authority=Developer ID Application"; then
+# (Read into a variable first: with pipefail, `codesign | grep -q` fails when
+# grep exits early.)
+SIGNATURE="$(codesign -dvv "$ROOT/dist/WhatsApp Zen.app" 2>&1 || true)"
+if [[ "$SIGNATURE" == *"Authority=Developer ID Application"* ]]; then
     if xcrun notarytool history --keychain-profile whatsapp-zen >/dev/null 2>&1; then
         xcrun notarytool submit "$ZIP" --keychain-profile whatsapp-zen --wait
         xcrun stapler staple "$ROOT/dist/WhatsApp Zen.app"
@@ -29,6 +31,10 @@ if codesign -dv "$ROOT/dist/WhatsApp Zen.app" 2>&1 | grep -q "Authority=Develope
     fi
 fi
 echo "Notarized: $NOTARIZED"
+if [ "$NOTARIZED" != yes ]; then
+    echo "Refusing to publish a build Gatekeeper would block." >&2
+    exit 1
+fi
 SHA="$(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
 
 gh release create "v$VERSION" "$ZIP" --repo "$REPO" --title "v$VERSION" --generate-notes
@@ -38,10 +44,6 @@ gh repo clone "$TAP" "$WORK/tap"
 mkdir -p "$WORK/tap/Casks"
 sed -e "s/VERSION/$VERSION/" -e "s/SHA256/$SHA/" "$ROOT/packaging/whatsapp-zen.rb" \
     | grep -v '^# ' > "$WORK/tap/Casks/whatsapp-zen.rb"
-if [ "$NOTARIZED" = yes ]; then
-    # A notarized app opens without complaint; drop the quarantine advice.
-    sed -i '' '/caveats <<~EOS/,/^  EOS/d' "$WORK/tap/Casks/whatsapp-zen.rb"
-fi
 git -C "$WORK/tap" add Casks/whatsapp-zen.rb
 git -C "$WORK/tap" commit -m "whatsapp-zen $VERSION"
 git -C "$WORK/tap" push
