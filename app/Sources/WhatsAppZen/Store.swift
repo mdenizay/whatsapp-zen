@@ -77,6 +77,9 @@ final class AppStore: ObservableObject, Identifiable {
     @Published var viewer: ViewerState?
     /// A second chat shown beside the open one in the main window.
     @Published var splitChat: String?
+    /// The first message that was unread when the open chat was opened.
+    @Published var unreadFrom: String?
+    private var unreadAtOpen = 0
     /// Unsent text per chat.
     @Published var drafts: [String: String] = [:]
     /// Further files queued behind the staged attachment, sent with it.
@@ -254,6 +257,11 @@ final class AppStore: ObservableObject, Identifiable {
         Task { @MainActor in
             guard let list = await self.fetchMessages(chat: chat, limit: limit), chat == self.selected else { return }
             if list != self.messages { self.messages = list }
+            if self.unreadAtOpen > 0 {
+                // Mark where the unread messages begin, once per opening.
+                self.unreadFrom = list.filter { !$0.fromMe }.suffix(self.unreadAtOpen).first?.id
+                self.unreadAtOpen = 0
+            }
             self.hasMore = list.count >= limit
             let pinned: [Message] = Self.isDemo ? list.filter(\.pinned)
                 : ((try? await Core.call("pinned", ["chat": chat], account: self.id)) ?? [])
@@ -279,7 +287,9 @@ final class AppStore: ObservableObject, Identifiable {
         pinnedMessages = []
         hasMore = false
         clearDraftState()
+        unreadFrom = nil
         guard let jid else { return }
+        unreadAtOpen = chats.first { $0.jid == jid }?.unread ?? 0
         if let chat = chats.first(where: { $0.jid == jid }) { loadMembers(of: chat) }
         reloadMessages()
         watchPresence(of: jid)

@@ -159,13 +159,17 @@ struct MenuChatView: View {
                                 store.view(item, among: messages)
                             }
                         ))
+                        Color.clear.frame(height: 1).id("bottom")
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
                 }
                 .defaultScrollAnchor(.bottom)
                 .onChange(of: messages.last?.id) { _, last in
-                    if let last { proxy.scrollTo(last, anchor: .bottom) }
+                    guard last != nil else { return }
+                    for delay in [0, 0.1, 0.4] {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { proxy.scrollTo("bottom", anchor: .bottom) }
+                    }
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     ComposerBar(text: $text, reply: $reply, editing: $editing, image: .constant(nil), file: .constant(nil),

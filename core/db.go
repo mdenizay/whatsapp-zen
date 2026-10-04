@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/base64"
+	"os"
 	"strings"
 	"time"
 
@@ -279,6 +280,15 @@ func (a *App) getMessages(chat string, beforeTS int64, beforeID string, limit in
 	}
 	if err != nil {
 		return nil, err
+	}
+	for _, m := range msgs {
+		// A photo already on disk is shown from its file; its embedded
+		// thumbnail would only be encoded, sent and thrown away.
+		if m.Type == "image" && m.MediaPath != "" {
+			if _, err := os.Stat(m.MediaPath); err == nil {
+				m.Thumb = ""
+			}
+		}
 	}
 	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
 		msgs[i], msgs[j] = msgs[j], msgs[i]

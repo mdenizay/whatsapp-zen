@@ -266,7 +266,7 @@ struct StatusSheet: View {
                                     Text(Format.time(person.items.last?.date ?? Date())).font(.caption).foregroundStyle(.secondary)
                                 }
                                 ForEach(person.items) { item in
-                                    MessageRow(message: item, showSender: false, endsGroup: true, highlighted: false, maxWidth: 360,
+                                    MessageRow(store: store, message: item, showSender: false, endsGroup: true, highlighted: false, maxWidth: 360,
                                                actions: MessageActions(reply: { _ in }, preview: { store.previewURL = URL(fileURLWithPath: $0) },
                                                        view: { item in
                                                            dismiss()

@@ -59,18 +59,33 @@ enum Images {
     // MARK: Avatars
 
     private static var avatarKeys: [String: NSString] = [:]
+    private static var avatarPaths: [String: (path: String, at: Date)] = [:]
 
     /// Profile photo for a jid at a point size, or nil when there is none.
     static func avatar(jid: String, size: CGFloat) async -> NSImage? {
-        guard let path: String = try? await Core.call("avatar", ["jid": jid]), !path.isEmpty else { return nil }
-        let img = await load(path: path, maxPixel: size * 2)
-        await MainActor.run { avatarKeys[jid] = "\(path)#\(Int(size * 2))" as NSString }
+        // Rows are rebuilt constantly while scrolling; remember the answer
+        // (including "no photo") for a while instead of asking the core again.
+        let account = Core.active
+        let known = await MainActor.run { avatarPaths["\(account)/\(jid)"] }
+        var path = ""
+        if let known, Date().timeIntervalSince(known.at) < 600 {
+            path = known.path
+        } else {
+            path = (try? await Core.call("avatar", ["jid": jid], account: account)) ?? ""
+            let found = path
+            await MainActor.run { avatarPaths["\(account)/\(jid)"] = (found, Date()) }
+        }
+        let file = path
+        guard !file.isEmpty else { return nil }
+        let img = await load(path: file, maxPixel: size * 2)
+        await MainActor.run { avatarKeys[jid] = "\(file)#\(Int(size * 2))" as NSString }
         return img
     }
 
     @MainActor
     static func forgetAvatar(_ jid: String) {
         if let key = avatarKeys.removeValue(forKey: jid) { cache.removeObject(forKey: key) }
+        avatarPaths = avatarPaths.filter { !$0.key.hasSuffix("/\(jid)") }
     }
 
     // MARK: Sending

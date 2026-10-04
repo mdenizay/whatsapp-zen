@@ -16,8 +16,19 @@ struct MessageActions {
     var view: ((Message) -> Void)?
 }
 
+extension MessageRow: Equatable {
+    /// A row depends only on its message and a few flags; with this the list
+    /// skips every row that did not change when the store publishes anything
+    /// (a typing indicator, a presence update, another chat's message).
+    static func == (a: MessageRow, b: MessageRow) -> Bool {
+        a.message == b.message && a.showSender == b.showSender && a.endsGroup == b.endsGroup
+            && a.highlighted == b.highlighted && a.maxWidth == b.maxWidth
+    }
+}
+
 struct MessageRow: View {
-    @EnvironmentObject var store: AppStore
+    /// A plain reference, not an observed one: see Equatable above.
+    let store: AppStore
     let message: Message
     let showSender: Bool
     /// Last bubble of a run from the same sender; it gets the "tail" corner.
@@ -575,9 +586,12 @@ struct BubbleStack: Layout {
 
 /// Lays out a conversation: day dividers, sender runs and bubble tails.
 struct MessageList: View {
+    @EnvironmentObject var store: AppStore
     let messages: [Message]
     let isGroup: Bool
     var highlighted: String?
+    /// The first message that was unread when the chat was opened.
+    var unreadFrom: String?
     var maxWidth: CGFloat = 520
     let actions: MessageActions
 
@@ -588,7 +602,16 @@ struct MessageList: View {
             let newDay = previous.map { !Calendar.current.isDate($0.date, inSameDayAs: message.date) } ?? true
             let nextDay = next.map { !Calendar.current.isDate($0.date, inSameDayAs: message.date) } ?? true
             if newDay { DayDivider(date: message.date) }
+            if message.id == unreadFrom {
+                HStack(spacing: 8) {
+                    VStack { Divider() }
+                    Text(L("Unread messages")).font(.caption.weight(.medium)).foregroundStyle(Theme.accent).fixedSize()
+                    VStack { Divider() }
+                }
+                .padding(.vertical, 6)
+            }
             MessageRow(
+                store: store,
                 message: message,
                 showSender: isGroup && !message.fromMe && (newDay || previous?.sender != message.sender),
                 endsGroup: nextDay || next?.sender != message.sender,
@@ -596,6 +619,7 @@ struct MessageList: View {
                 maxWidth: maxWidth,
                 actions: actions
             )
+            .equatable()
             .id(message.id)
         }
     }

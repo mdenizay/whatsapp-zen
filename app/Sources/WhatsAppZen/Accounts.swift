@@ -13,14 +13,18 @@ final class AppModel: ObservableObject {
     /// Settings are shown as a sheet on the main window.
     @Published var showingSettings = false
     @Published var showingNewChat = false
-    @Published var sidebarHidden = false
+    /// Bound straight to the split view. (A binding rebuilt on every redraw
+    /// made the split view re-apply its ideal width, so the list kept
+    /// changing size by itself.)
+    @Published var sidebarVisibility = NavigationSplitViewVisibility.all
+    var sidebarHidden: Bool { sidebarVisibility == .detailOnly }
 
     /// Shows or hides the chat list at once. Animating it makes the
     /// conversation re-wrap on every frame, which reads as jitter.
     func toggleSidebar() {
         var instant = Transaction()
         instant.disablesAnimations = true
-        withTransaction(instant) { sidebarHidden.toggle() }
+        withTransaction(instant) { sidebarVisibility = sidebarHidden ? .all : .detailOnly }
     }
     @Published var showingSwitcher = false
     @Published var showingStatus = false

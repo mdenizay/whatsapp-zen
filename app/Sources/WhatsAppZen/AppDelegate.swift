@@ -18,6 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var panel: MenuPanel!
     private var clickMonitors: [Any] = []
     private var chatWindows: [String: NSWindow] = [:]
+    /// The main window's views are dropped while it is closed.
+    private var mainContentReleased = false
     private var subscriptions = Set<AnyCancellable>()
 
     private static let panelSize = NSSize(width: 380, height: 560)
@@ -80,23 +82,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.minSize = NSSize(width: 700, height: 460)
         window.toolbarStyle = .unified
         window.titlebarSeparatorStyle = .none
+        window.contentView = makeMainContent()
+        window.delegate = self
+        window.center()
+        // Snapshots use a fixed size and must not disturb the saved frame.
+        if ProcessInfo.processInfo.environment["WA_SNAPSHOT"] == nil { window.setFrameAutosaveName("main") }
+    }
+
+    private func makeMainContent() -> NSView {
         let hosting = NSHostingView(rootView: RootView { MainView() }.environmentObject(model))
         // Don't let the (initially empty) SwiftUI content dictate the window size.
         hosting.sizingOptions = []
-        window.contentView = hosting
-        window.delegate = self
-        window.center()
-        window.setFrameAutosaveName("main")
+        return hosting
     }
 
     func showWindow() {
         closePanel()
+        if mainContentReleased {
+            window.contentView = makeMainContent()
+            mainContentReleased = false
+        }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         model.windowVisible = true
     }
 
-    func windowWillClose(_ notification: Notification) { model.windowVisible = false }
+    func windowWillClose(_ notification: Notification) {
+        guard notification.object as? NSWindow === window else { return }
+        model.windowVisible = false
+        // Living in the menu bar only: drop the window's views so nothing is
+        // redrawn (or kept in memory) for a window nobody can see.
+        DispatchQueue.main.async { [self] in
+            guard !window.isVisible else { return }
+            window.contentView = NSView()
+            mainContentReleased = true
+        }
+    }
     func windowDidMiniaturize(_ notification: Notification) { model.windowVisible = false }
     func windowDidDeminiaturize(_ notification: Notification) { model.windowVisible = true }
 
@@ -248,6 +269,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// bar views to PNG files and quits, for checking layout without a screen.
     private func snapshotIfRequested() {
         guard let dir = ProcessInfo.processInfo.environment["WA_SNAPSHOT"], let store = model.active else { return }
+        if ProcessInfo.processInfo.environment["WA_DARK"] != nil { NSApp.appearance = NSAppearance(named: .darkAqua) }
         let out = URL(fileURLWithPath: dir)
         // The window server's own picture of a window: the real rendering,
         // glass included. A process may capture its own windows without the

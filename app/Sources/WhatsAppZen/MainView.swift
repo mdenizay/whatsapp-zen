@@ -16,10 +16,7 @@ struct MainView: View {
             if pairing {
                 PairingView()
             } else {
-                NavigationSplitView(columnVisibility: Binding(
-                    get: { model.sidebarHidden ? .detailOnly : .all },
-                    set: { model.sidebarHidden = $0 == .detailOnly }
-                )) {
+                NavigationSplitView(columnVisibility: $model.sidebarVisibility) {
                     Sidebar(newChat: $model.showingNewChat)
                         .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 420)
                         .toolbar(removing: .sidebarToggle)
@@ -177,6 +174,7 @@ struct Sidebar: View {
             ForEach(chats) { chat in
                 ChatRow(chat: chat, typing: store.typing[chat.jid] != nil, tick: store.avatarTick,
                         draft: chat.jid == store.selected ? nil : store.drafts[chat.jid], sealed: store.isSealed(chat.jid))
+                    .equatable()
                     .tag(chat.jid)
                     .contextMenu {
                         if chat.muted {
@@ -285,6 +283,14 @@ struct Sidebar: View {
     }
 }
 
+extension ChatRow: Equatable {
+    /// Lets the list skip rows whose chat did not change when something
+    /// else in the store did.
+    static func == (a: ChatRow, b: ChatRow) -> Bool {
+        a.chat == b.chat && a.typing == b.typing && a.tick == b.tick && a.draft == b.draft && a.sealed == b.sealed
+    }
+}
+
 struct ChatRow: View {
     let chat: Chat
     let typing: Bool
@@ -346,6 +352,8 @@ struct ChatView: View {
     @State private var highlighted: String?
     @State private var dropping = false
     @State private var farFromBottom = false
+    /// Whether the first scroll to the newest message has happened.
+    @State private var settled = false
     @State private var forwarding: Message?
     @State private var searching = false
     @State private var showingStarred = false
@@ -370,7 +378,7 @@ struct ChatView: View {
                         .buttonStyle(.glass)
                         .padding(8)
                     }
-                    MessageList(messages: store.messages, isGroup: chat.isGroup, highlighted: highlighted, actions: MessageActions(
+                    MessageList(messages: store.messages, isGroup: chat.isGroup, highlighted: highlighted, unreadFrom: store.unreadFrom, actions: MessageActions(
                         reply: { store.editing = nil; store.replyTo = $0 },
                         edit: { store.clearDraftState(); store.editing = $0; text = $0.text },
                         forward: { forwarding = $0 },
@@ -378,6 +386,7 @@ struct ChatView: View {
                         preview: { store.previewURL = URL(fileURLWithPath: $0) },
                         view: { store.view($0) }
                     ))
+                    Color.clear.frame(height: 1).id("bottom")
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -386,8 +395,7 @@ struct ChatView: View {
                 .transaction { $0.animation = nil }
             }
             .defaultScrollAnchor(.bottom)
-            .scrollEdgeEffectStyle(.hard, for: .top)
-            .scrollEdgeEffectStyle(.soft, for: .bottom)
+            .scrollEdgeEffectStyle(.soft, for: .all)
             .onScrollGeometryChange(for: Bool.self) { geo in
                 geo.contentSize.height - geo.contentOffset.y - geo.containerSize.height > 260
             } action: { _, far in
@@ -421,15 +429,27 @@ struct ChatView: View {
                 }
             }
             .onChange(of: store.messages.last?.id) { _, last in
+                guard last != nil else { return }
+                if !settled {
+                    // First load of this chat: go to the newest message. Lazy
+                    // rows only learn their real height once on screen, so one
+                    // jump lands short; repeat as the layout settles.
+                    settled = true
+                    for delay in [0, 0.08, 0.3, 0.7] {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { proxy.scrollTo("bottom", anchor: .bottom) }
+                    }
+                    return
+                }
                 // Don't yank the view down while the user is reading older messages.
-                guard let last, !farFromBottom || store.messages.last?.fromMe == true else { return }
-                proxy.scrollTo(last, anchor: .bottom)
+                guard !farFromBottom || store.messages.last?.fromMe == true else { return }
+                proxy.scrollTo("bottom", anchor: .bottom)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { proxy.scrollTo("bottom", anchor: .bottom) }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(alignment: .trailing, spacing: 8) {
                     if farFromBottom {
                         Button {
-                            if let last = store.messages.last?.id { withAnimation { proxy.scrollTo(last, anchor: .bottom) } }
+                            withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
                         } label: {
                             Image(systemName: "chevron.down").frame(width: 18, height: 22)
                         }

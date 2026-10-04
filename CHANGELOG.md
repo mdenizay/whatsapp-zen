@@ -2,6 +2,13 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.5.2
+
+- A chat opens at its newest message and stays there as messages arrive
+- A line marks where the unread messages begin
+- The chat list no longer changes width by itself
+- Less redrawing: rows that did not change are skipped, the main window stops updating while closed, profile photos are looked up once
+
 ## 0.5.1
 
 - Split view lays out properly and widens a narrow window
