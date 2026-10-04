@@ -15,6 +15,10 @@ final class Prefs: ObservableObject {
     @Published var accent: String = value("accent", "green") { didSet { save("accent", accent) } }
     @Published var compact: Bool = value("compact", false) { didSet { save("compact", compact) } }
 
+    // Writing
+    /// Turn typed emoticons such as :) into emoji.
+    @Published var emoticons: Bool = value("emoticons", true) { didSet { save("emoticons", emoticons) } }
+
     // Menu bar
     @Published var menuBarCount: Bool = value("menuBarCount", false) { didSet { save("menuBarCount", menuBarCount) } }
 
@@ -56,6 +60,48 @@ final class Prefs: ObservableObject {
 
     var accentEntry: (id: String, light: UInt32, dark: UInt32, bubbleLight: UInt32, bubbleDark: UInt32) {
         Self.accents.first { $0.id == accent } ?? Self.accents[0]
+    }
+}
+
+/// Typed emoticons and the emoji they stand for.
+enum Emoticons {
+    private static let table: [String: String] = [
+        ":)": "🙂", ":-)": "🙂", "(:": "🙂", ":D": "😀", ":-D": "😀", "xD": "😆", "XD": "😆", ";)": "😉", ";-)": "😉",
+        ":(": "🙁", ":-(": "🙁", ":'(": "😢", ":P": "😛", ":p": "😛", ":-P": "😛", ":O": "😮", ":o": "😮", ":-O": "😮",
+        ":*": "😘", ":-*": "😘", ":|": "😐", ":-|": "😐", ":/": "😕", ":-/": "😕", ":\\": "😕", "B)": "😎", "8)": "😎",
+        ">:(": "😠", ":$": "😳", "<3": "❤️", "</3": "💔", ":3": "😺", "^^": "😊", "^_^": "😊", "-_-": "😑", "o.O": "🤨",
+        "O:)": "😇", ":')": "🥲", "D:": "😧",
+    ]
+
+    /// Converts emoticons that stand as words of their own. Anything glued
+    /// to other text (the ":/" in "https://", say) is left alone.
+    static func convert(_ text: String) -> String {
+        guard Prefs.shared.emoticons else { return text }
+        var out = ""
+        var word = ""
+        func flush() {
+            out += table[word] ?? word
+            word = ""
+        }
+        for character in text {
+            if character.isWhitespace {
+                flush()
+                out.append(character)
+            } else {
+                word.append(character)
+            }
+        }
+        flush()
+        return out
+    }
+
+    /// While typing: converts the word just finished by a space or return.
+    static func convertLastWord(_ text: String) -> String? {
+        guard Prefs.shared.emoticons, let last = text.last, last.isWhitespace else { return nil }
+        let body = text.dropLast()
+        let start = body.lastIndex(where: \.isWhitespace).map { body.index(after: $0) } ?? body.startIndex
+        guard let emoji = table[String(body[start...])] else { return nil }
+        return String(body[..<start]) + emoji + String(last)
     }
 }
 

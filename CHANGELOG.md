@@ -2,6 +2,12 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.5.3
+
+- Typed emoticons such as :) ;) :D <3 turn into emoji (can be switched off in Settings → General)
+- The chat list keeps its width when you switch chats
+- With the chat list hidden, a button next to it lists your recent chats
+
 ## 0.5.2
 
 - A chat opens at its newest message and stays there as messages arrive

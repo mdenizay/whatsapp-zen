@@ -18,25 +18,32 @@ struct MainView: View {
             } else {
                 NavigationSplitView(columnVisibility: $model.sidebarVisibility) {
                     Sidebar(newChat: $model.showingNewChat)
-                        .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 420)
-                        .toolbar(removing: .sidebarToggle)
+                        // The system's own sidebar button stays: the toolbar item it
+                        // brings is what ties the toolbar's split to the list's edge.
+                        // Without it the list snapped to the width of its buttons.
+                        .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 440)
                 } detail: {
                     Group {
                         if let chat = store.selectedChat {
                             if let other = store.chats.first(where: { $0.jid == store.splitChat }), other.jid != chat.jid {
                                 SplitChats(chat: chat, other: other)
                             } else {
-                                ChatView(chat: chat).id(chat.jid)
+                                ChatView(chat: chat)
                             }
                         } else {
                             ContentUnavailableView(L("Select a chat"), systemImage: "bubble.left.and.bubble.right",
                                                    description: Text(L("Pick a chat on the left, or start a new one.")))
                         }
                     }
+                    // A fixed ideal width. Left to itself the conversation asks
+                    // for the width of its longest message, differently for
+                    // every chat, and the split view answers each time by
+                    // resizing the chat list.
+                    .frame(minWidth: 380, idealWidth: 640, maxWidth: .infinity, maxHeight: .infinity)
                     .toolbar {
-                        // With the list hidden, its toggle lives here.
+                        // With the list hidden, recent chats are one click away.
                         if model.sidebarHidden {
-                            ToolbarItem(placement: .navigation) { SidebarToggle() }
+                            ToolbarItem(placement: .navigation) { RecentChatsMenu() }
                         }
                     }
                 }
@@ -81,7 +88,7 @@ struct SplitChats: View {
             // main conversation below a usable width.
             let pane = min(max(geo.size.width * 0.4, 280), max(geo.size.width - 340, 240))
             HStack(spacing: 0) {
-                ChatView(chat: chat).id(chat.jid)
+                ChatView(chat: chat)
                     .frame(width: geo.size.width - pane - 1)
                     .clipped()
                 Divider()
@@ -107,11 +114,9 @@ struct SplitChats: View {
     }
 }
 
-/// Shows or hides the chat list. Click toggles; click and hold lists the
-/// recent chats, to switch without opening the list.
-struct SidebarToggle: View {
+/// The most recent chats as a menu, for switching while the list is hidden.
+struct RecentChatsMenu: View {
     @EnvironmentObject var store: AppStore
-    @EnvironmentObject var model: AppModel
 
     var body: some View {
         Menu {
@@ -123,12 +128,10 @@ struct SidebarToggle: View {
                 }
             }
         } label: {
-            Image(systemName: "sidebar.left")
-        } primaryAction: {
-            model.toggleSidebar()
+            Image(systemName: "bubble.left.and.bubble.right")
         }
         .menuIndicator(.hidden)
-        .help(L("Show or hide chats; hold for recent chats"))
+        .help(L("Recent chats"))
     }
 }
 
@@ -277,7 +280,6 @@ struct Sidebar: View {
                     .help(L("Settings"))
                 Button(L("New Chat"), systemImage: "square.and.pencil") { newChat = true }
                     .help(L("New Chat"))
-                SidebarToggle()
             }
         }
     }
@@ -394,6 +396,7 @@ struct ChatView: View {
                 // slides; that shows up as the whole conversation flickering.
                 .transaction { $0.animation = nil }
             }
+            .id(chat.jid)
             .defaultScrollAnchor(.bottom)
             .scrollEdgeEffectStyle(.soft, for: .all)
             .onScrollGeometryChange(for: Bool.self) { geo in
@@ -533,6 +536,15 @@ struct ChatView: View {
             StickerPicker(chat: chat) { pickingSticker = false }.environmentObject(store)
         }
         .onAppear { text = store.drafts[chat.jid] ?? "" }
+        // The view itself is kept when the chat changes: replacing it made
+        // the split view lay its columns out again on every click, which
+        // showed as the chat list shrinking and growing.
+        .onChange(of: chat.jid) { _, jid in
+            text = store.drafts[jid] ?? ""
+            settled = false
+            farFromBottom = false
+            highlighted = nil
+        }
         .onChange(of: text) { _, new in
             if store.editing == nil { store.setDraft(new, for: chat.jid) }
         }
@@ -740,14 +752,17 @@ struct ComposerBar: View {
                         .padding(.vertical, 8)
                         .frame(minHeight: Self.height)
                         .focused($focused)
-                        .onSubmit { if canSend { onSend() } }
+                        .onSubmit { if canSend { submit() } }
                         .onKeyPress(.upArrow) {
                             guard text.isEmpty, editing == nil, let onEditLast else { return .ignored }
                             onEditLast()
                             return .handled
                         }
-                        .onChange(of: text) { _, new in
+                        .onChange(of: text) { old, new in
                             if !new.isEmpty { onTyping() }
+                            // ":)" then a space becomes 🙂. Only when a character
+                            // was just added, so deleting the space does not redo it.
+                            if new.count == old.count + 1, let converted = Emoticons.convertLastWord(new) { text = converted }
                         }
                 }
                 .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
@@ -817,8 +832,14 @@ struct ComposerBar: View {
         } else if offersVoice {
             recorder.start()
         } else {
-            onSend()
+            submit()
         }
+    }
+
+    /// Sends, converting an emoticon that was typed last and never followed by a space.
+    private func submit() {
+        if editing == nil || !text.isEmpty { text = Emoticons.convert(text) }
+        onSend()
     }
 
     /// What the message being written refers to or carries.

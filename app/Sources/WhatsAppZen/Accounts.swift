@@ -19,13 +19,6 @@ final class AppModel: ObservableObject {
     @Published var sidebarVisibility = NavigationSplitViewVisibility.all
     var sidebarHidden: Bool { sidebarVisibility == .detailOnly }
 
-    /// Shows or hides the chat list at once. Animating it makes the
-    /// conversation re-wrap on every frame, which reads as jitter.
-    func toggleSidebar() {
-        var instant = Transaction()
-        instant.disablesAnimations = true
-        withTransaction(instant) { sidebarVisibility = sidebarHidden ? .all : .detailOnly }
-    }
     @Published var showingSwitcher = false
     @Published var showingStatus = false
     /// Release notes to show once after an update.

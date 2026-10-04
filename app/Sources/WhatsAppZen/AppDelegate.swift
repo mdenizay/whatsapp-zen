@@ -293,6 +293,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if ProcessInfo.processInfo.environment["WA_SPLIT"] != nil { store.splitChat = store.chats.dropFirst().first?.jid }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [self] in
             if let view = window.contentView?.superview { save(view, "main.png") }
+            if ProcessInfo.processInfo.environment["WA_SWITCH"] != nil {
+                // Step through the chats and capture after each, to compare
+                // layouts. Chained rather than looped: the main queue has to
+                // run between steps for a chat to load.
+                let chats = Array(store.chats.prefix(4))
+                func step(_ index: Int) {
+                    guard index < chats.count else { exit(0) }
+                    store.open(chats[index].jid)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [self] in
+                        if let view = window.contentView?.superview { save(view, "switch-\(index).png") }
+                        step(index + 1)
+                    }
+                }
+                step(1)
+                return
+            }
             if let photo = ProcessInfo.processInfo.environment["WA_PHOTO"] {
                 // Stage a picture and capture the send screen, then the viewer.
                 store.attach([URL(fileURLWithPath: photo)])

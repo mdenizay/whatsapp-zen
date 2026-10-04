@@ -91,6 +91,7 @@ struct SettingsView: View {
 
 private struct GeneralSettings: View {
     @EnvironmentObject var model: AppModel
+    @ObservedObject private var prefs = Prefs.shared
     @ObservedObject private var updater = Updater.shared
 
     private var updateStatus: String {
@@ -123,6 +124,9 @@ private struct GeneralSettings: View {
                         }
                     }
                 }
+            }
+            Section {
+                Toggle(L("Turn emoticons like :) into emoji"), isOn: $prefs.emoticons)
             }
             Section(L("Language")) {
                 Text(L("The app follows the language set for it in System Settings.")).foregroundStyle(.secondary)
