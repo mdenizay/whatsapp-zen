@@ -70,7 +70,7 @@ struct MessageResults: View {
                         HStack {
                             Text(message.fromMe ? L("You") : message.senderName).font(.caption.weight(.semibold))
                             Spacer()
-                            Text("\(Format.listStamp(message.ts)) \(Format.time(message.date))").font(.caption).foregroundStyle(.secondary)
+                            Text(Format.stamp(message.ts)).font(.caption).foregroundStyle(.secondary)
                         }
                         Text(message.plainText).lineLimit(3)
                     }

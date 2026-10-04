@@ -154,6 +154,13 @@ enum Format {
         return shortDay.string(from: date)
     }
 
+    /// Day and time of a message for result lists: just the time for today.
+    static func stamp(_ ts: Int) -> String {
+        let date = Date(timeIntervalSince1970: TimeInterval(ts))
+        if Calendar.current.isDateInToday(date) { return time.string(from: date) }
+        return "\(listStamp(ts)) \(time.string(from: date))"
+    }
+
     static func lastSeen(_ ts: Int) -> String {
         let date = Date(timeIntervalSince1970: TimeInterval(ts))
         let cal = Calendar.current

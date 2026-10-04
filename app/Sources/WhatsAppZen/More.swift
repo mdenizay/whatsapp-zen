@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: Quick switcher (⌘K)
 
@@ -294,8 +295,9 @@ struct ChatInfoSheet: View {
     let manageGroup: () -> Void
 
     @State private var info: UserInfo?
-    @State private var kind = "media"
+    @State private var kind = ProcessInfo.processInfo.environment["WA_INFO"] ?? "media"
     @State private var items: [Message] = []
+    @State private var loading = true
 
     private var current: Chat { store.chats.first { $0.jid == chat.jid } ?? chat }
 
@@ -303,74 +305,8 @@ struct ChatInfoSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                AvatarView(jid: chat.jid, name: chat.name, size: 56, tick: store.avatarTick)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(chat.name).font(.title3.weight(.semibold))
-                    if !chat.isGroup {
-                        Text("+" + (chat.jid.split(separator: "@").first ?? "")).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
-                    }
-                    if let about = info?.about, !about.isEmpty {
-                        Text(about).font(.callout).foregroundStyle(.secondary).lineLimit(2)
-                    }
-                }
-                Spacer()
-                Button(L("Close")) { dismiss() }.keyboardShortcut(.cancelAction)
-            }
-            .padding(14)
-
-            HStack(spacing: 8) {
-                Menu {
-                    if current.muted {
-                        Button(L("Unmute")) { store.mute(current, seconds: 0) }
-                    } else {
-                        Button(L("8 hours")) { store.mute(current, seconds: 8 * 3600) }
-                        Button(L("1 week")) { store.mute(current, seconds: 7 * 86400) }
-                        Button(L("Always")) { store.mute(current, seconds: -1) }
-                    }
-                } label: {
-                    Label(current.muted ? L("Muted") : L("Mute"), systemImage: current.muted ? "bell.slash.fill" : "bell.slash")
-                }
-                Menu {
-                    ForEach(Self.timers, id: \.1) { title, seconds in
-                        Button {
-                            store.setDisappearing(current, seconds: seconds)
-                        } label: {
-                            Label(L(title), systemImage: current.ephemeral == seconds ? "checkmark" : "timer")
-                        }
-                    }
-                } label: {
-                    Label(L("Disappearing"), systemImage: current.ephemeral > 0 ? "timer.circle.fill" : "timer")
-                }
-                Toggle(isOn: Binding(get: { store.isLocked(chat.jid) }, set: { store.setLocked(chat.jid, $0) })) {
-                    Label(L("Lock"), systemImage: "lock")
-                }
-                .toggleStyle(.button)
-                Spacer()
-                Menu {
-                    Button(L("Export Chat…"), systemImage: "square.and.arrow.up") { store.export(chat) }
-                    if chat.isGroup {
-                        Button(L("Members…"), systemImage: "person.2") {
-                            dismiss()
-                            manageGroup()
-                        }
-                    } else if let info {
-                        Button(info.blocked ? L("Unblock") : L("Block"), systemImage: "hand.raised", role: info.blocked ? nil : .destructive) {
-                            Task { @MainActor in
-                                await store.block(chat.jid, !info.blocked)
-                                self.info = await store.userInfo(chat.jid)
-                            }
-                        }
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .menuIndicator(.hidden)
-                .fixedSize()
-            }
-            .padding(.horizontal, 14)
-            .padding(.bottom, 10)
-
+            header
+            actions
             Picker(L("Shared"), selection: $kind) {
                 Text(L("Media")).tag("media")
                 Text(L("Documents")).tag("docs")
@@ -378,34 +314,256 @@ struct ChatInfoSheet: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 10)
+            Divider()
+            shared
+        }
+        .frame(width: 520, height: 640)
+        .overlay(alignment: .topTrailing) {
+            Button { dismiss() } label: {
+                Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.secondary)
+                    .frame(width: 26, height: 26).background(.quaternary, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
+            .padding(12)
+            .help(L("Close"))
+        }
+        .task { if !chat.isGroup { info = await store.userInfo(chat.jid) } }
+        .task(id: kind) {
+            loading = true
+            items = await store.media(chat: chat.jid, kind: kind)
+            loading = false
+        }
+    }
 
-            Group {
-                if items.isEmpty {
-                    Text(L("Nothing here yet")).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if kind == "media" {
-                    ScrollView {
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 4), spacing: 4) {
-                            ForEach(items) { item in
-                                MediaTile(message: item) { reveal(item) }
-                            }
-                        }
-                        .padding(14)
-                    }
+    private var header: some View {
+        VStack(spacing: 6) {
+            AvatarView(jid: chat.jid, name: chat.name, size: 92, tick: store.avatarTick)
+            Text(chat.name).font(.title2.weight(.semibold)).lineLimit(1)
+            if !chat.isGroup {
+                Text("+" + (chat.jid.split(separator: "@").first ?? "")).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            if let about = info?.about, !about.isEmpty {
+                Text(about).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(2)
+            }
+        }
+        .padding(.top, 26)
+        .padding(.horizontal, 30)
+    }
+
+    private var actions: some View {
+        HStack(spacing: 10) {
+            Menu {
+                if current.muted {
+                    Button(L("Unmute")) { store.mute(current, seconds: 0) }
                 } else {
-                    MessageResults(messages: items, empty: "") { reveal($0) }
+                    Button(L("8 hours")) { store.mute(current, seconds: 8 * 3600) }
+                    Button(L("1 week")) { store.mute(current, seconds: 7 * 86400) }
+                    Button(L("Always")) { store.mute(current, seconds: -1) }
+                }
+            } label: {
+                InfoTile(title: current.muted ? L("Muted") : L("Mute"), icon: current.muted ? "bell.slash.fill" : "bell", active: current.muted)
+            }
+            .tileMenu()
+            Menu {
+                ForEach(Self.timers, id: \.1) { title, seconds in
+                    Button {
+                        store.setDisappearing(current, seconds: seconds)
+                    } label: {
+                        Label(L(title), systemImage: current.ephemeral == seconds ? "checkmark" : "timer")
+                    }
+                }
+            } label: {
+                InfoTile(title: L("Disappearing"), icon: "timer", active: current.ephemeral > 0)
+            }
+            .tileMenu()
+            Button { store.setLocked(chat.jid, !store.isLocked(chat.jid)) } label: {
+                InfoTile(title: store.isLocked(chat.jid) ? L("Locked") : L("Lock"),
+                         icon: store.isLocked(chat.jid) ? "lock.fill" : "lock.open", active: store.isLocked(chat.jid))
+            }
+            .buttonStyle(.plain)
+            Button { store.export(chat) } label: {
+                InfoTile(title: L("Export"), icon: "square.and.arrow.up", active: false)
+            }
+            .buttonStyle(.plain)
+            if chat.isGroup {
+                Button {
+                    dismiss()
+                    manageGroup()
+                } label: {
+                    InfoTile(title: L("Members"), icon: "person.2", active: false)
+                }
+                .buttonStyle(.plain)
+            } else if let info {
+                Button {
+                    Task { @MainActor in
+                        await store.block(chat.jid, !info.blocked)
+                        self.info = await store.userInfo(chat.jid)
+                    }
+                } label: {
+                    InfoTile(title: info.blocked ? L("Unblock") : L("Block"), icon: "hand.raised", active: info.blocked, danger: true)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+    }
+
+    @ViewBuilder private var shared: some View {
+        if items.isEmpty {
+            VStack(spacing: 8) {
+                if loading {
+                    ProgressView()
+                } else {
+                    Image(systemName: kind == "media" ? "photo.on.rectangle" : kind == "docs" ? "doc" : "link")
+                        .font(.system(size: 30)).foregroundStyle(.tertiary)
+                    Text(L("Nothing here yet")).foregroundStyle(.secondary)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if kind == "media" {
+            ScrollView {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 4), spacing: 3) {
+                    ForEach(items) { item in
+                        MediaTile(message: item) { open(item) }
+                            .contextMenu { Button(L("Show in Chat"), systemImage: "bubble.left") { reveal(item) } }
+                    }
+                }
+                .padding(12)
+            }
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(items) { item in
+                        SharedRow(message: item, isLink: kind == "links",
+                                  who: item.fromMe ? L("You") : (item.senderName.isEmpty ? chat.name : item.senderName),
+                                  open: { kind == "links" ? openLink(item) : open(item) }, reveal: { reveal(item) })
+                        Divider().padding(.leading, 62)
+                    }
+                }
+                .padding(.vertical, 6)
+            }
         }
-        .frame(width: 500, height: 560)
-        .task { if !chat.isGroup { info = await store.userInfo(chat.jid) } }
-        .task(id: kind) { items = await store.media(chat: chat.jid, kind: kind) }
+    }
+
+    /// Fetches the file if needed and shows it in Quick Look.
+    private func open(_ message: Message) {
+        Task { @MainActor in
+            var path = message.mediaPath ?? ""
+            if path.isEmpty || !FileManager.default.fileExists(atPath: path) {
+                path = (try? await Core.call("download", ["chat": message.chat, "id": message.id])) ?? ""
+            }
+            if !path.isEmpty { store.previewURL = URL(fileURLWithPath: path) }
+        }
+    }
+
+    private func openLink(_ message: Message) {
+        if let url = SharedRow.firstURL(in: message.text) { NSWorkspace.shared.open(url) }
     }
 
     private func reveal(_ message: Message) {
         dismiss()
         store.reveal(message)
+    }
+}
+
+/// One of the round-cornered action buttons under the header.
+private struct InfoTile: View {
+    let title: String
+    let icon: String
+    let active: Bool
+    var danger = false
+
+    var body: some View {
+        VStack(spacing: 5) {
+            Image(systemName: icon).font(.system(size: 17, weight: .medium))
+            Text(title).font(.caption).lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .foregroundStyle(danger ? AnyShapeStyle(.red) : (active ? AnyShapeStyle(.white) : AnyShapeStyle(Theme.accent)))
+        .frame(maxWidth: .infinity)
+        .frame(height: 58)
+        .background(active && !danger ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.quaternary.opacity(0.7)),
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .contentShape(Rectangle())
+    }
+}
+
+private extension View {
+    /// A menu that looks like its label and nothing more.
+    func tileMenu() -> some View {
+        menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+    }
+}
+
+/// A shared document or link.
+private struct SharedRow: View {
+    let message: Message
+    let isLink: Bool
+    let who: String
+    let open: () -> Void
+    let reveal: () -> Void
+
+    @State private var hovering = false
+
+    static func firstURL(in text: String) -> URL? {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return nil }
+        return detector.firstMatch(in: text, range: NSRange(text.startIndex..., in: text))?.url
+    }
+
+    private var title: String {
+        if isLink {
+            if let title = message.linkTitle, !title.isEmpty { return title }
+            return Self.firstURL(in: message.text)?.absoluteString ?? message.text
+        }
+        return message.fileName ?? L("Document")
+    }
+
+    private var detail: String {
+        let when = Format.stamp(message.ts)
+        if isLink, let host = Self.firstURL(in: message.text)?.host() { return "\(host) · \(who) · \(when)" }
+        return "\(who) · \(when)"
+    }
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 12) {
+                Group {
+                    if isLink {
+                        if let image = Images.thumbnail(base64: message.thumb) {
+                            Image(nsImage: image).resizable().scaledToFill()
+                        } else {
+                            Image(systemName: "link").font(.title3).foregroundStyle(Theme.accent)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity).background(Theme.accent.opacity(0.14))
+                        }
+                    } else {
+                        Image(nsImage: NSWorkspace.shared.icon(for: UTType(filenameExtension: (title as NSString).pathExtension) ?? .data))
+                            .resizable().scaledToFit()
+                    }
+                }
+                .frame(width: 38, height: 38)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).lineLimit(1).truncationMode(.middle)
+                    Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                if hovering {
+                    Button(action: reveal) { Image(systemName: "bubble.left") }
+                        .buttonStyle(.borderless)
+                        .help(L("Show in Chat"))
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(hovering ? AnyShapeStyle(.primary.opacity(0.05)) : AnyShapeStyle(.clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .contextMenu { Button(L("Show in Chat"), systemImage: "bubble.left", action: reveal) }
     }
 }
 
@@ -415,20 +573,22 @@ private struct MediaTile: View {
 
     var body: some View {
         Button(action: pick) {
-            ZStack {
-                if let image = Images.thumbnail(base64: message.thumb) {
-                    Image(nsImage: image).resizable().scaledToFill()
-                } else {
-                    Rectangle().fill(.quaternary)
+            Color.clear
+                .aspectRatio(1, contentMode: .fit)
+                .overlay {
+                    if let image = Images.thumbnail(base64: message.thumb) {
+                        Image(nsImage: image).resizable().scaledToFill()
+                    } else {
+                        Rectangle().fill(.quaternary)
+                    }
                 }
-                if message.type == "video" {
-                    Image(systemName: "play.fill").foregroundStyle(.white).shadow(radius: 2)
+                .overlay {
+                    if message.type == "video" {
+                        Image(systemName: "play.fill").font(.title3).foregroundStyle(.white).shadow(radius: 3)
+                    }
                 }
-            }
-            .frame(minWidth: 0, maxWidth: .infinity)
-            .aspectRatio(1, contentMode: .fill)
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .contentShape(Rectangle())
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

@@ -2,6 +2,11 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.4.2
+
+- A redesigned chat info panel: bigger header, one-tap actions, and shared photos, documents and links that open on click
+- Click the name or photo at the top of a chat to open its info
+
 ## 0.4.1
 
 - Settings → Privacy shows whether FileVault is encrypting what the app stores

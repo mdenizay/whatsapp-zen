@@ -275,3 +275,6 @@
 "FileVault is on. Everything this app stores is encrypted on disk." = "FileVault açık. Bu uygulamanın sakladığı her şey diskte şifreli.";
 "FileVault is off. Messages on this Mac are stored unencrypted." = "FileVault kapalı. Bu Mac'teki mesajlar şifresiz saklanıyor.";
 "Open FileVault Settings…" = "FileVault Ayarlarını Aç…";
+"Show in Chat" = "Sohbette Göster";
+"Export" = "Dışa Aktar";
+"Members" = "Üyeler";

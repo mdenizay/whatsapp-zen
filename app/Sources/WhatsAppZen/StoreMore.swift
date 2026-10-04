@@ -84,7 +84,11 @@ extension AppStore {
     }
 
     func media(chat: String, kind: String) async -> [Message] {
-        (try? await Core.call("chat_media", ["chat": chat, "kind": kind], account: id)) ?? []
+        if Self.isDemo {
+            let all = Demo.messages(for: chat) + Demo.messages(for: "x@g.us")
+            return all.filter { kind == "docs" ? $0.type == "document" : kind == "links" ? $0.text.contains("http") : false }
+        }
+        return (try? await Core.call("chat_media", ["chat": chat, "kind": kind], account: id)) ?? []
     }
 
     func export(_ chat: Chat) {

@@ -263,6 +263,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         store.open(store.chats.first?.jid)
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [self] in
             if let view = window.contentView?.superview { save(view, "main.png") }
+            if ProcessInfo.processInfo.environment["WA_INFO"] != nil {
+                if let view = window.attachedSheet?.contentView { save(view, "info.png") }
+                exit(0)
+            }
             openPanel()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [self] in
                 if let view = panel.contentView { save(view, "menu.png") }

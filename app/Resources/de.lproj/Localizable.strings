@@ -275,3 +275,6 @@
 "FileVault is on. Everything this app stores is encrypted on disk." = "FileVault ist aktiviert. Alles, was diese App speichert, ist auf der Festplatte verschlüsselt.";
 "FileVault is off. Messages on this Mac are stored unencrypted." = "FileVault ist deaktiviert. Nachrichten auf diesem Mac werden unverschlüsselt gespeichert.";
 "Open FileVault Settings…" = "FileVault-Einstellungen öffnen…";
+"Show in Chat" = "Im Chat anzeigen";
+"Export" = "Exportieren";
+"Members" = "Mitglieder";

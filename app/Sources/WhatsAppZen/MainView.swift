@@ -254,7 +254,8 @@ struct ChatView: View {
     @State private var forwarding: Message?
     @State private var searching = false
     @State private var showingStarred = false
-    @State private var showingInfo = false
+    /// WA_INFO (demo snapshots) starts with the info sheet open.
+    @State private var showingInfo = ProcessInfo.processInfo.environment["WA_INFO"] != nil
     @State private var showingMembers = false
     @State private var composingPoll = false
     @State private var pickingContact = false
@@ -361,12 +362,29 @@ struct ChatView: View {
         }
         .background(.background)
         .navigationTitle(chat.name)
-        .navigationSubtitle(store.subtitle(for: chat))
+        .toolbar(removing: .title)
         .toolbar {
+            // The photo and name open the chat's info, as people expect.
             ToolbarItem(placement: .navigation) {
-                AvatarView(jid: chat.jid, name: chat.name, size: 30, tick: store.avatarTick)
+                Button { showingInfo = true } label: {
+                    HStack(spacing: 9) {
+                        AvatarView(jid: chat.jid, name: chat.name, size: 30, tick: store.avatarTick)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(chat.name).font(.headline).lineLimit(1)
+                            let subtitle = store.subtitle(for: chat)
+                            if !subtitle.isEmpty {
+                                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(L("Chat info, media and settings"))
             }
             .sharedBackgroundVisibility(.hidden)
+            // With the title gone, keep the actions at the trailing edge.
+            ToolbarSpacer(.flexible)
             ToolbarItemGroup(placement: .primaryAction) {
                 Button(L("Search in Chat"), systemImage: "magnifyingglass") { searching = true }
                     .popover(isPresented: $searching, arrowEdge: .bottom) {
