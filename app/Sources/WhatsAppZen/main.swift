@@ -1,5 +1,7 @@
 import AppKit
 
+Prefs.migrate()
+
 let delegate = AppDelegate()
 NSApplication.shared.delegate = delegate
 NSApplication.shared.setActivationPolicy(.regular)

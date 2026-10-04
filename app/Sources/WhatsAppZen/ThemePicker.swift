@@ -29,8 +29,23 @@ struct ThemePicker: View {
 
     private var colors: [Int] { prefs.themeColor2 >= 0 ? [prefs.customAccent, prefs.themeColor2] : [prefs.customAccent] }
 
-    private func set(_ index: Int, _ hex: Int) {
-        if index == 0 { prefs.customAccent = hex } else { prefs.themeColor2 = hex }
+    /// The point straight across the centre of the field: the opposite colour.
+    static func opposite(_ point: CGPoint) -> CGPoint {
+        CGPoint(x: 1 - min(max(point.x, 0), 1), y: 1 - min(max(point.y, 0), 1))
+    }
+
+    /// Moves a dot. With two dots they stay opposite each other, so dragging
+    /// either one carries the other across the field.
+    private func move(_ index: Int, to point: CGPoint) {
+        let paired = prefs.themeColor2 >= 0
+        let own = Self.color(at: point), other = Self.color(at: Self.opposite(point))
+        if index == 0 {
+            prefs.customAccent = own
+            if paired { prefs.themeColor2 = other }
+        } else {
+            prefs.themeColor2 = own
+            prefs.customAccent = other
+        }
         prefs.accent = "custom"
         prefs.wallpaper = "theme"
     }
@@ -99,8 +114,10 @@ struct ThemePicker: View {
                     Button { prefs.themeColor2 = -1 } label: { Image(systemName: "minus") }
                         .disabled(prefs.themeColor2 < 0)
                     Button {
-                        let first = Self.position(of: prefs.customAccent)
-                        set(1, Self.color(at: CGPoint(x: (first.x + 0.18).truncatingRemainder(dividingBy: 1), y: first.y)))
+                        // The second colour starts as the first one's opposite.
+                        prefs.themeColor2 = Self.color(at: Self.opposite(Self.position(of: prefs.customAccent)))
+                        prefs.accent = "custom"
+                        prefs.wallpaper = "theme"
                     } label: { Image(systemName: "plus") }
                         .disabled(prefs.themeColor2 >= 0)
                 }
@@ -111,13 +128,13 @@ struct ThemePicker: View {
                 ForEach(Array(colors.enumerated()), id: \.offset) { index, hex in
                     let point = Self.position(of: hex)
                     Circle().fill(Color(hex: hex))
-                        .frame(width: index == 0 ? 30 : 24, height: index == 0 ? 30 : 24)
+                        .frame(width: index == 0 ? 34 : 22, height: index == 0 ? 34 : 22)
                         .overlay(Circle().strokeBorder(.white, lineWidth: 3))
                         .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
                         .position(x: point.x * size.width, y: 34 + point.y * (size.height - 68))
                         .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                            set(index, Self.color(at: CGPoint(x: value.location.x / size.width,
-                                                              y: (value.location.y - 34) / (size.height - 68))))
+                            move(index, to: CGPoint(x: value.location.x / size.width,
+                                                    y: (value.location.y - 34) / (size.height - 68)))
                         })
                 }
             }

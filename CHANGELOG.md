@@ -2,6 +2,11 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.7.1
+
+- Theme picker: the second colour is the opposite of the first, and the two dots move together across the field
+- A pale theme colour no longer washes out buttons and bubbles
+
 ## 0.7.0
 
 - A theme picker in the manner of Arc and Zen: drag a dot across a colour field, add a second for a gradient, choose light or dark, set how strongly the colours tint the window

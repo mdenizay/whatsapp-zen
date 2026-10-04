@@ -6,6 +6,19 @@ import SwiftUI
 final class Prefs: ObservableObject {
     static let shared = Prefs()
 
+    /// One-time changes to stored preferences; run before any are read.
+    static func migrate() {
+        let defaults = UserDefaults.standard
+        // Themes now start with two colours. A stored "single colour" from the
+        // first version of the picker was its default, not a choice.
+        if !defaults.bool(forKey: "migrated.themePair") {
+            for key in defaults.dictionaryRepresentation().keys where key == "themeColor2" || key.hasSuffix(".themeColor2") {
+                if (defaults.object(forKey: key) as? Int ?? Int(defaults.string(forKey: key) ?? "")) == -1 { defaults.removeObject(forKey: key) }
+            }
+            defaults.set(true, forKey: "migrated.themePair")
+        }
+    }
+
     private static func value<T>(_ key: String, _ fallback: T) -> T {
         UserDefaults.standard.object(forKey: key) as? T ?? fallback
     }
@@ -30,7 +43,10 @@ final class Prefs: ObservableObject {
         }
     }
     /// Second colour of the "theme" background as 0xRRGGBB; -1 for a single colour.
-    @Published var themeColor2: Int = value("themeColor2", -1) { didSet { saveLook("themeColor2", themeColor2) } }
+    @Published var themeColor2: Int = value("themeColor2", Prefs.defaultSecond) { didSet { saveLook("themeColor2", themeColor2) } }
+
+    /// A theme starts with two colours: the default green and its opposite.
+    static let defaultSecond = ThemePicker.color(at: ThemePicker.opposite(ThemePicker.position(of: 0x1DAA61)))
     /// How strongly the theme colours wash the window (0.05 … 0.6).
     @Published var themeIntensity: Double = value("themeIntensity", 0.22) { didSet { saveLook("themeIntensity", themeIntensity) } }
     /// How strongly a picture wallpaper is faded toward the window colour.
@@ -146,7 +162,8 @@ final class Prefs: ObservableObject {
         wallpaperPath = look("wallpaperPath", "")
         wallpaperDim = look("wallpaperDim", 0.55)
         fontDesign = look("fontDesign", "default")
-        themeColor2 = look("themeColor2", -1)
+        // No second colour stored: pair the first with its opposite.
+        themeColor2 = look("themeColor2", ThemePicker.color(at: ThemePicker.opposite(ThemePicker.position(of: customAccent))))
         themeIntensity = look("themeIntensity", 0.22)
     }
 
@@ -190,11 +207,21 @@ final class Prefs: ObservableObject {
     var accentEntry: (id: String, light: UInt32, dark: UInt32, bubbleLight: UInt32, bubbleDark: UInt32) {
         if accent == "custom" {
             // Bubbles carry white text, so they use a darker shade of the colour.
-            let base = UInt32(customAccent)
+            // A pale pick still has to work as a button and a bubble colour,
+            // so the accent is that hue made vivid and dark enough.
+            let base = Self.strengthened(customAccent)
             let darker = Self.scale(base, 0.82)
             return ("custom", base, Self.scale(base, 1.12), darker, Self.scale(base, 0.7))
         }
         return Self.accents.first { $0.id == accent } ?? Self.accents[0]
+    }
+
+    private static func strengthened(_ hex: Int) -> UInt32 {
+        let color = NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        color.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        let strong = NSColor(hue: h, saturation: max(s, 0.6), brightness: min(max(b, 0.45), 0.74), alpha: 1).usingColorSpace(.sRGB) ?? color
+        return UInt32(strong.redComponent * 255) << 16 | UInt32(strong.greenComponent * 255) << 8 | UInt32(strong.blueComponent * 255)
     }
 
     private static func scale(_ hex: UInt32, _ factor: Double) -> UInt32 {
