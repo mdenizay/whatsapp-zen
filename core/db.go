@@ -76,6 +76,15 @@ func openDB(path string) (*sql.DB, error) {
 		`ALTER TABLE messages ADD COLUMN starred INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE messages ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE chats ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE chats ADD COLUMN muted_until INTEGER NOT NULL DEFAULT 0`, // -1: muted for good
+		`ALTER TABLE chats ADD COLUMN ephemeral INTEGER NOT NULL DEFAULT 0`,   // disappearing timer, seconds
+		`ALTER TABLE messages ADD COLUMN link_title TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE messages ADD COLUMN link_desc TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE messages ADD COLUMN poll TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE messages ADD COLUMN mentions_me INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE messages ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0`,
+		`CREATE TABLE IF NOT EXISTS poll_votes(chat TEXT NOT NULL, msg_id TEXT NOT NULL, voter TEXT NOT NULL,
+			options TEXT NOT NULL, PRIMARY KEY(chat, msg_id, voter))`,
 	} {
 		db.Exec(stmt)
 	}
@@ -128,27 +137,32 @@ func setReaction(x execer, chat, msgID, sender, emoji string) error {
 
 // MsgJSON is a message as handed to the UI.
 type MsgJSON struct {
-	ID           string     `json:"id"`
-	Chat         string     `json:"chat"`
-	Sender       string     `json:"sender"`
-	SenderName   string     `json:"sender_name"`
-	FromMe       bool       `json:"from_me"`
-	TS           int64      `json:"ts"`
-	Type         string     `json:"type"`
-	Text         string     `json:"text"`
-	Thumb        string     `json:"thumb,omitempty"`
-	MediaPath    string     `json:"media_path,omitempty"`
-	FileName     string     `json:"file_name,omitempty"`
-	W            int        `json:"w"`
-	H            int        `json:"h"`
-	QuotedID     string     `json:"quoted_id,omitempty"`
-	QuotedText   string     `json:"quoted_text,omitempty"`
-	QuotedSender string     `json:"quoted_sender,omitempty"`
-	Status       int        `json:"status"`
-	Edited       bool       `json:"edited"`
-	Deleted      bool       `json:"deleted"`
-	Starred      bool       `json:"starred"`
-	Pinned       bool       `json:"pinned"`
+	ID           string    `json:"id"`
+	Chat         string    `json:"chat"`
+	Sender       string    `json:"sender"`
+	SenderName   string    `json:"sender_name"`
+	FromMe       bool      `json:"from_me"`
+	TS           int64     `json:"ts"`
+	Type         string    `json:"type"`
+	Text         string    `json:"text"`
+	Thumb        string    `json:"thumb,omitempty"`
+	MediaPath    string    `json:"media_path,omitempty"`
+	FileName     string    `json:"file_name,omitempty"`
+	W            int       `json:"w"`
+	H            int       `json:"h"`
+	QuotedID     string    `json:"quoted_id,omitempty"`
+	QuotedText   string    `json:"quoted_text,omitempty"`
+	QuotedSender string    `json:"quoted_sender,omitempty"`
+	Status       int       `json:"status"`
+	Edited       bool      `json:"edited"`
+	Deleted      bool      `json:"deleted"`
+	Starred      bool      `json:"starred"`
+	Pinned       bool      `json:"pinned"`
+	LinkTitle    string    `json:"link_title,omitempty"`
+	LinkDesc     string    `json:"link_desc,omitempty"`
+	MentionsMe   bool      `json:"mentions_me"`
+	Poll         *PollJSON `json:"poll,omitempty"`
+	pollRaw      string
 	Reactions    []Reaction `json:"reactions"`
 }
 
@@ -159,7 +173,7 @@ type Reaction struct {
 	FromMe bool   `json:"from_me"`
 }
 
-const msgCols = `id,chat,sender,from_me,ts,type,text,thumb,media_path,file_name,w,h,quoted_id,quoted_text,quoted_sender,status,edited,deleted,starred,pinned`
+const msgCols = `id,chat,sender,from_me,ts,type,text,thumb,media_path,file_name,w,h,quoted_id,quoted_text,quoted_sender,status,edited,deleted,starred,pinned,link_title,link_desc,mentions_me,poll`
 
 // queryMessages runs a SELECT over msgCols and attaches names and reactions.
 func (a *App) queryMessages(where string, args ...any) ([]*MsgJSON, error) {
@@ -173,7 +187,8 @@ func (a *App) queryMessages(where string, args ...any) ([]*MsgJSON, error) {
 		m := &MsgJSON{Reactions: []Reaction{}}
 		var thumb []byte
 		if err := rows.Scan(&m.ID, &m.Chat, &m.Sender, &m.FromMe, &m.TS, &m.Type, &m.Text, &thumb, &m.MediaPath,
-			&m.FileName, &m.W, &m.H, &m.QuotedID, &m.QuotedText, &m.QuotedSender, &m.Status, &m.Edited, &m.Deleted, &m.Starred, &m.Pinned); err != nil {
+			&m.FileName, &m.W, &m.H, &m.QuotedID, &m.QuotedText, &m.QuotedSender, &m.Status, &m.Edited, &m.Deleted, &m.Starred, &m.Pinned,
+			&m.LinkTitle, &m.LinkDesc, &m.MentionsMe, &m.pollRaw); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -188,6 +203,7 @@ func (a *App) queryMessages(where string, args ...any) ([]*MsgJSON, error) {
 		return out, nil
 	}
 
+	a.attachPolls(out)
 	me := a.meString()
 	for _, m := range out {
 		if !m.FromMe {
@@ -237,6 +253,8 @@ func (a *App) queryMessages(where string, args ...any) ([]*MsgJSON, error) {
 // getMessages returns one page in ascending order. With beforeTS == 0 it is
 // the newest page; otherwise the page just older than (beforeTS, beforeID).
 func (a *App) getMessages(chat string, beforeTS int64, beforeID string, limit int) ([]*MsgJSON, error) {
+	// Disappearing messages whose time is up.
+	a.db.Exec(`DELETE FROM messages WHERE expires_at > 0 AND expires_at < strftime('%s','now')`)
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
@@ -280,10 +298,13 @@ type ChatJSON struct {
 	LastFile   string `json:"last_file"`
 	Archived   bool   `json:"archived"`
 	Pinned     bool   `json:"pinned"`
+	Muted      bool   `json:"muted"`
+	Ephemeral  int    `json:"ephemeral"`
 }
 
 func (a *App) getChats() ([]*ChatJSON, error) {
 	rows, err := a.db.Query(`SELECT c.jid, c.last_ts, c.unread, c.archived, c.pinned,
+			(c.muted_until < 0 OR c.muted_until > strftime('%s','now')), c.ephemeral,
 			COALESCE(m.type,''), COALESCE(m.text,''), COALESCE(m.from_me,0), COALESCE(m.status,0),
 			COALESCE(m.sender,''), COALESCE(m.deleted,0), COALESCE(m.file_name,'')
 		FROM chats c LEFT JOIN messages m ON m.chat=c.jid
@@ -298,7 +319,7 @@ func (a *App) getChats() ([]*ChatJSON, error) {
 		c := &ChatJSON{}
 		var sender string
 		var deleted bool
-		if err := rows.Scan(&c.JID, &c.LastTS, &c.Unread, &c.Archived, &c.Pinned, &c.LastType, &c.LastText, &c.LastFromMe, &c.LastStatus,
+		if err := rows.Scan(&c.JID, &c.LastTS, &c.Unread, &c.Archived, &c.Pinned, &c.Muted, &c.Ephemeral, &c.LastType, &c.LastText, &c.LastFromMe, &c.LastStatus,
 			&sender, &deleted, &c.LastFile); err != nil {
 			rows.Close()
 			return nil, err

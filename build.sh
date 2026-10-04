@@ -30,6 +30,7 @@ cp "$ROOT/app/.build/release/WhatsAppZen" "$APP/Contents/MacOS/"
 cp "$ROOT/app/Info.plist" "$APP/Contents/"
 [ -f "$ROOT/app/AppIcon.icns" ] && cp "$ROOT/app/AppIcon.icns" "$APP/Contents/Resources/"
 cp -R "$ROOT/app/Resources/"* "$APP/Contents/Resources/"
+cp "$ROOT/CHANGELOG.md" "$APP/Contents/Resources/"
 # With a Developer ID certificate in the keychain, sign for distribution
 # (hardened runtime, as notarization requires); otherwise sign ad hoc, which
 # runs fine locally but is blocked by Gatekeeper on other Macs.

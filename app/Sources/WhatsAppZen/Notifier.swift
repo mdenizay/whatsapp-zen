@@ -77,14 +77,16 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func post(account: AppStore, chat: String, chatName: String, message: Message) {
-        guard available, enabled else { return }
+        guard available, enabled, !Prefs.shared.paused else { return }
+        // A locked chat, or a locked app, gives nothing away in its banner.
+        let hidden = account.isLocked(chat) || AppModel.shared.locked
         let content = UNMutableNotificationContent()
         content.title = chatName
         var subtitle: [String] = []
         if chat.hasSuffix("@g.us") { subtitle.append(message.senderName) }
         if AppModel.shared.accounts.count > 1 { subtitle.append(account.label) }
         content.subtitle = subtitle.joined(separator: " · ")
-        content.body = preview ? message.plainText : L("New message")
+        content.body = preview && !hidden ? message.plainText : L("New message")
         applySound(to: content)
         content.categoryIdentifier = "message"
         content.threadIdentifier = "\(account.id)/\(chat)"

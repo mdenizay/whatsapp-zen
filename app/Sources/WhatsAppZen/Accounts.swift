@@ -11,6 +11,41 @@ final class AppModel: ObservableObject {
     @Published private(set) var activeID = ""
     /// Settings are shown as a sheet on the main window.
     @Published var showingSettings = false
+    @Published var showingNewChat = false
+    @Published var showingSwitcher = false
+    @Published var showingStatus = false
+    /// Release notes to show once after an update.
+    @Published var releaseNotes: String?
+    /// True while the app waits for Touch ID.
+    @Published private(set) var locked = Prefs.shared.appLock && !AppStore.isDemo
+    private var leftAt: Date?
+
+    func unlock() {
+        guard locked else { return }
+        Auth.unlock(reason: L("Unlock WhatsApp Zen")) { ok in
+            if ok { self.locked = false }
+        }
+    }
+
+    func lock() {
+        guard Prefs.shared.appLock else { return }
+        accounts.forEach { $0.unlockedChats.removeAll() }
+        locked = true
+    }
+
+    /// Opens the chat at a position in the list (⌘1…⌘9) or next to the open one.
+    func openChat(at index: Int) {
+        guard let store = active else { return }
+        let chats = store.chats.filter { !$0.archived }
+        if chats.indices.contains(index) { store.openChecked(chats[index].jid) }
+    }
+
+    func stepChat(_ delta: Int) {
+        guard let store = active else { return }
+        let chats = store.chats.filter { !$0.archived }
+        let current = chats.firstIndex { $0.jid == store.selected } ?? -1
+        openChat(at: min(max(current + delta, 0), chats.count - 1))
+    }
 
     /// Fires for incoming messages that deserve a notification.
     let incoming = PassthroughSubject<(account: AppStore, chat: String, chatName: String, message: Message), Never>()
@@ -91,5 +126,16 @@ final class AppModel: ObservableObject {
 
     func appActiveChanged() {
         accounts.forEach { $0.attentionChanged() }
+        if NSApp.isActive {
+            if let leftAt, Date().timeIntervalSince(leftAt) >= Double(Prefs.shared.lockAfter * 60) { lock() }
+            leftAt = nil
+        } else {
+            leftAt = Date()
+            // Sealed chats close again as soon as the app is left.
+            for store in accounts where store.selected.map(store.isLocked) == true {
+                store.unlockedChats.removeAll()
+                store.open(nil)
+            }
+        }
     }
 }

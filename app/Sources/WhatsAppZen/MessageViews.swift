@@ -24,6 +24,7 @@ struct MessageRow: View {
     var maxWidth: CGFloat = 520
     let actions: MessageActions
 
+    @ObservedObject private var prefs = Prefs.shared
     @State private var hovering = false
     @State private var picking = false
     @State private var confirmDelete = false
@@ -100,7 +101,9 @@ struct MessageRow: View {
         .foregroundStyle(mine ? .white : .primary)
         .tint(mine ? .white : Theme.accent)
         .background(mine ? Theme.bubbleOut : Theme.bubbleIn, in: shape)
-        .frame(maxWidth: maxWidth, alignment: mine ? .trailing : .leading)
+        // Someone mentioned you: the bubble gets an accent outline.
+        .overlay(shape.strokeBorder(Theme.accent, lineWidth: message.mentionsMe ? 1.5 : 0))
+        .cappedWidth(maxWidth)
     }
 
     @ViewBuilder private var content: some View {
@@ -119,12 +122,19 @@ struct MessageRow: View {
             VoiceView(message: message, onBubble: mine)
         case "video", "document":
             FileAttachmentView(message: message, onBubble: mine, preview: actions.preview)
+        case "poll":
+            if let poll = message.poll { PollView(message: message, poll: poll, onBubble: mine) }
         default:
             EmptyView()
         }
-        if !message.text.isEmpty {
+        if message.type == "text", message.linkTitle?.isEmpty == false {
+            LinkCard(message: message, onBubble: mine)
+        }
+        if message.type == "poll", message.poll != nil {
+            meta.frame(maxWidth: .infinity, alignment: .trailing)
+        } else if !message.text.isEmpty {
             HStack(alignment: .lastTextBaseline, spacing: 8) {
-                Text(Self.linkified(message.text))
+                Text(Self.linkified(message.text)).font(.system(size: prefs.fontSize)).textSelection(.enabled)
                 meta
             }
         } else if !bare {
@@ -336,14 +346,18 @@ struct MediaImageView: View {
         .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
         .contentShape(Rectangle())
         .onTapGesture {
-            if let path { preview(path) }
+            if let path { preview(path) } else { Task { await load(force: true) } }
         }
         .task(id: message.id) { await load() }
     }
 
-    private func load() async {
+    private func load(force: Bool = false) async {
         guard path == nil else { return }
         if image == nil { image = Images.thumbnail(base64: message.thumb) }
+        // With automatic downloads off, only what is already on disk loads
+        // by itself; a click fetches the rest.
+        let onDisk = message.mediaPath.map { !$0.isEmpty && FileManager.default.fileExists(atPath: $0) } ?? false
+        guard force || onDisk || Prefs.shared.autoDownload else { return }
         guard let file = await mediaPath(for: message),
               let full = await Images.load(path: file, maxPixel: Self.maxPixel) else { return }
         image = full
@@ -502,6 +516,27 @@ struct FileAttachmentView: View {
             }
             preview(path)
         }
+    }
+}
+
+/// Limits a view's width without making it take that width: unlike
+/// frame(maxWidth:), the result is exactly as wide as the content.
+struct CappedWidth: Layout {
+    let max: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let view = subviews.first else { return .zero }
+        return view.sizeThatFits(ProposedViewSize(width: min(proposal.width ?? max, max), height: proposal.height))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
+    }
+}
+
+extension View {
+    func cappedWidth(_ max: CGFloat) -> some View {
+        CappedWidth(max: max) { self }
     }
 }
 

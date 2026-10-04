@@ -6,7 +6,6 @@ import UniformTypeIdentifiers
 struct MainView: View {
     @EnvironmentObject var store: AppStore
     @EnvironmentObject var model: AppModel
-    @State private var newChat = false
 
     private var pairing: Bool {
         ["starting", "qr", "logged_out"].contains(store.state)
@@ -18,7 +17,7 @@ struct MainView: View {
                 PairingView()
             } else {
                 NavigationSplitView {
-                    Sidebar(newChat: $newChat).navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 420)
+                    Sidebar(newChat: $model.showingNewChat).navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 420)
                 } detail: {
                     if let chat = store.selectedChat {
                         ChatView(chat: chat).id(chat.jid)
@@ -27,11 +26,22 @@ struct MainView: View {
                                                description: Text(L("Pick a chat on the left, or start a new one.")))
                     }
                 }
-                .sheet(isPresented: $newChat) { NewChatView() }
+                .sheet(isPresented: $model.showingNewChat) { NewChatView() }
+                .sheet(isPresented: $model.showingSwitcher) { QuickSwitcher() }
+                .sheet(isPresented: $model.showingStatus) { StatusSheet() }
             }
         }
         .tint(Theme.accent)
         .sheet(isPresented: $model.showingSettings) { SettingsView().environmentObject(model) }
+        .sheet(isPresented: Binding(get: { model.releaseNotes != nil }, set: { if !$0 { model.releaseNotes = nil } })) {
+            ReleaseNotesSheet(notes: model.releaseNotes ?? "")
+        }
+        .onAppear {
+            // After an update, say what changed, once.
+            guard !AppStore.isDemo, Prefs.shared.notesShownFor != Links.version else { return }
+            Prefs.shared.notesShownFor = Links.version
+            model.releaseNotes = ReleaseNotes.current()
+        }
         .quickLookPreview($store.previewURL)
         .alert(L("Error"), isPresented: Binding(get: { store.errorText != nil && !pairing }, set: { if !$0 { store.errorText = nil } })) {
             Button(L("OK")) { store.errorText = nil }
@@ -61,6 +71,7 @@ struct Sidebar: View {
     @EnvironmentObject var model: AppModel
     @Binding var newChat: Bool
     @State private var query = ""
+    @State private var hits: [Message] = []
     @State private var filter = ChatFilter.all
 
     private var chats: [Chat] {
@@ -78,10 +89,24 @@ struct Sidebar: View {
     }
 
     var body: some View {
-        List(selection: Binding(get: { store.selected }, set: { store.open($0) })) {
+        List(selection: Binding(get: { store.selected }, set: { store.openChecked($0) })) {
             ForEach(chats) { chat in
-                ChatRow(chat: chat, typing: store.typing[chat.jid] != nil, tick: store.avatarTick).tag(chat.jid)
+                ChatRow(chat: chat, typing: store.typing[chat.jid] != nil, tick: store.avatarTick,
+                        draft: chat.jid == store.selected ? nil : store.drafts[chat.jid], sealed: store.isSealed(chat.jid))
+                    .tag(chat.jid)
                     .contextMenu {
+                        if chat.muted {
+                            Button(L("Unmute"), systemImage: "bell") { store.mute(chat, seconds: 0) }
+                        } else {
+                            Menu(L("Mute"), systemImage: "bell.slash") {
+                                Button(L("8 hours")) { store.mute(chat, seconds: 8 * 3600) }
+                                Button(L("1 week")) { store.mute(chat, seconds: 7 * 86400) }
+                                Button(L("Always")) { store.mute(chat, seconds: -1) }
+                            }
+                        }
+                        Button(store.isLocked(chat.jid) ? L("Remove Lock") : L("Lock"), systemImage: "lock") {
+                            store.setLocked(chat.jid, !store.isLocked(chat.jid))
+                        }
                         if !chat.archived {
                             Button(chat.pinned ? L("Unpin") : L("Pin"), systemImage: chat.pinned ? "pin.slash" : "pin") {
                                 store.pin(chat, !chat.pinned)
@@ -95,8 +120,39 @@ struct Sidebar: View {
                         }
                     }
             }
+            if !hits.isEmpty {
+                Section(L("Messages")) {
+                    ForEach(hits) { hit in
+                        Button {
+                            store.openChecked(hit.chat)
+                            store.reveal(hit)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack {
+                                    Text(store.chats.first { $0.jid == hit.chat }?.name ?? "").fontWeight(.medium).lineLimit(1)
+                                    Spacer()
+                                    Text(Format.listStamp(hit.ts)).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Text(store.isSealed(hit.chat) ? "🔒" : hit.plainText).font(.callout).foregroundStyle(.secondary).lineLimit(2)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
         }
         .searchable(text: $query, placement: .sidebar, prompt: L("Search"))
+        .task(id: query) {
+            // Search message text too, once typing pauses.
+            guard query.count >= 2 else {
+                hits = []
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            hits = await store.searchAll(query)
+        }
         .safeAreaInset(edge: .top, spacing: 0) {
             Picker(L("Filter"), selection: $filter) {
                 ForEach(ChatFilter.allCases, id: \.self) { Text($0.title) }
@@ -112,7 +168,7 @@ struct Sidebar: View {
                     ProgressView()
                     Text(L("Syncing chats…")).foregroundStyle(.secondary).font(.callout)
                 }
-            } else if chats.isEmpty {
+            } else if chats.isEmpty && hits.isEmpty {
                 Text(L("No results")).foregroundStyle(.secondary)
             }
         }
@@ -138,14 +194,22 @@ struct ChatRow: View {
     let chat: Chat
     let typing: Bool
     let tick: Int
+    /// Unsent text for this chat, shown in place of the last message.
+    var draft: String?
+    /// Locked and not opened yet: the preview stays hidden.
+    var sealed = false
+    @ObservedObject private var prefs = Prefs.shared
 
     var body: some View {
         HStack(spacing: 11) {
-            AvatarView(jid: chat.jid, name: chat.name, size: 44, tick: tick)
+            AvatarView(jid: chat.jid, name: chat.name, size: prefs.compact ? 32 : 44, tick: tick)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(chat.name).font(.body.weight(chat.unread > 0 ? .semibold : .medium)).lineLimit(1)
                     Spacer(minLength: 4)
+                    if chat.muted {
+                        Image(systemName: "bell.slash.fill").font(.caption2).foregroundStyle(.tertiary)
+                    }
                     if chat.pinned {
                         Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.tertiary)
                     }
@@ -154,8 +218,12 @@ struct ChatRow: View {
                         .foregroundStyle(chat.unread > 0 ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary))
                 }
                 HStack(spacing: 3) {
-                    if typing {
+                    if sealed {
+                        Label(L("Locked"), systemImage: "lock.fill").foregroundStyle(.secondary)
+                    } else if typing {
                         Text(L("typing…")).foregroundStyle(Theme.accent)
+                    } else if let draft, !draft.isEmpty {
+                        (Text(L("Draft") + ": ").foregroundStyle(.red) + Text(draft).foregroundStyle(.secondary))
                     } else {
                         if chat.lastFromMe, chat.lastType != "deleted" {
                             StatusTicks(status: chat.lastStatus).font(.caption2).foregroundStyle(.secondary)
@@ -163,13 +231,13 @@ struct ChatRow: View {
                         Text(chat.preview).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 4)
-                    if chat.unread > 0 { UnreadBadge(count: chat.unread) }
+                    if chat.unread > 0 { UnreadBadge(count: chat.unread).opacity(chat.muted ? 0.55 : 1) }
                 }
                 .font(.callout)
                 .lineLimit(1)
             }
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, prefs.compact ? 1 : 5)
     }
 }
 
@@ -187,6 +255,10 @@ struct ChatView: View {
     @State private var searching = false
     @State private var showingStarred = false
     @State private var showingInfo = false
+    @State private var showingMembers = false
+    @State private var composingPoll = false
+    @State private var pickingContact = false
+    @State private var pickingSticker = false
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -270,7 +342,15 @@ struct ChatView: View {
                         .transition(.scale.combined(with: .opacity))
                     }
                     ComposerBar(text: $text, reply: $store.replyTo, editing: $store.editing, image: $store.pendingImage,
-                                file: $store.pendingFile, chatName: chat.name, onAttach: pickFile(mediaOnly:),
+                                file: $store.pendingFile, chatName: chat.name, members: store.members,
+                                moreCount: store.pendingMore.count, onAttach: attach(_:),
+                                onEditLast: {
+                                    guard let last = store.messages.last(where: { $0.fromMe && $0.type == "text" && !$0.deleted }),
+                                          Date().timeIntervalSince(last.date) < 15 * 60 else { return }
+                                    store.clearDraftState()
+                                    store.editing = last
+                                    text = last.text
+                                },
                                 onVoice: { url, seconds in
                                     store.send(voice: url, seconds: seconds, to: chat.jid, replyTo: store.replyTo?.id)
                                     store.replyTo = nil
@@ -299,14 +379,30 @@ struct ChatView: View {
                         StarredView(chat: chat) { showingStarred = false }.environmentObject(store)
                     }
                     .help(L("Starred Messages"))
-                if chat.isGroup {
-                    Button(L("Group Info"), systemImage: "person.2") { showingInfo = true }
-                        .help(L("Group info and management"))
-                }
+                Button(L("Info"), systemImage: "info.circle") { showingInfo = true }
+                    .keyboardShortcut("i")
+                    .help(L("Chat info, media and settings"))
             }
         }
         .sheet(item: $forwarding) { ForwardSheet(message: $0) }
-        .sheet(isPresented: $showingInfo) { GroupInfoSheet(chat: chat) }
+        .sheet(isPresented: $showingInfo) { ChatInfoSheet(chat: chat) { showingMembers = true } }
+        .sheet(isPresented: $showingMembers) { GroupInfoSheet(chat: chat) }
+        .sheet(isPresented: $composingPoll) { PollComposer(chat: chat) }
+        .sheet(isPresented: $pickingContact) {
+            ContactPicker(title: L("Send Contact")) { store.sendContact($0, to: chat.jid) }
+        }
+        .popover(isPresented: $pickingSticker, arrowEdge: .bottom) {
+            StickerPicker(chat: chat) { pickingSticker = false }.environmentObject(store)
+        }
+        .onAppear { text = store.drafts[chat.jid] ?? "" }
+        .onChange(of: text) { _, new in
+            if store.editing == nil { store.setDraft(new, for: chat.jid) }
+        }
+        .onExitCommand {
+            // Esc backs out of a reply, an edit or a staged attachment.
+            if store.editing != nil { text = "" }
+            store.clearDraftState()
+        }
         .overlay {
             if dropping {
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -323,8 +419,25 @@ struct ChatView: View {
     private func send() {
         store.submit(text: text, to: chat.jid, reply: store.replyTo, editing: store.editing,
                      image: store.pendingImage, file: store.pendingFile)
+        // The files queued behind the staged one follow it.
+        let more = store.pendingMore
+        Task { @MainActor in
+            for url in more { await store.sendNow(url, to: chat.jid) }
+        }
         text = ""
+        store.setDraft("", for: chat.jid)
         store.clearDraftState()
+    }
+
+    private func attach(_ kind: AttachKind) {
+        switch kind {
+        case .media: pickFile(mediaOnly: true)
+        case .file: pickFile(mediaOnly: false)
+        case .poll: composingPoll = true
+        case .contact: pickingContact = true
+        case .sticker: pickingSticker = true
+        case .location: store.sendLocation(to: chat.jid)
+        }
     }
 
     private func jump(to id: String, proxy: ScrollViewProxy) {
@@ -338,17 +451,21 @@ struct ChatView: View {
 
     private func pickFile(mediaOnly: Bool) {
         let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         if mediaOnly { panel.allowedContentTypes = [.image, .movie] }
-        if panel.runModal() == .OK, let url = panel.url { store.attach(url) }
+        if panel.runModal() == .OK { store.attach(panel.urls) }
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
         guard let provider = providers.first else { return false }
         Task { @MainActor in
-            if let url = await Attachments.fileURL(from: provider) {
-                store.attach(url)
+            var urls: [URL] = []
+            for item in providers {
+                if let url = await Attachments.fileURL(from: item) { urls.append(url) }
+            }
+            if !urls.isEmpty {
+                store.attach(urls)
             } else {
                 Images.fromDrop([provider]) { images in
                     guard let image = images.first else { return }
@@ -376,6 +493,11 @@ extension AppStore {
     }
 }
 
+/// What the + menu of the composer can add.
+enum AttachKind {
+    case media, file, poll, contact, sticker, location
+}
+
 /// The floating message field, shared by the main window and the menu bar.
 struct ComposerBar: View {
     @Binding var text: String
@@ -385,7 +507,13 @@ struct ComposerBar: View {
     @Binding var file: PendingFile?
     let chatName: String
     /// Opens a file picker; the flag limits it to photos and videos.
-    var onAttach: ((_ mediaOnly: Bool) -> Void)?
+    /// People who can be @-mentioned (the open group's members).
+    var members: [GroupMember] = []
+    /// How many more files are queued behind the staged attachment.
+    var moreCount = 0
+    var onAttach: ((AttachKind) -> Void)?
+    /// ↑ in an empty field: edit the last message sent.
+    var onEditLast: (() -> Void)?
     /// Sends a finished voice recording; nil hides the microphone.
     var onVoice: ((_ url: URL, _ seconds: Int) -> Void)?
 
@@ -395,6 +523,7 @@ struct ComposerBar: View {
     let onSend: () -> Void
 
     @FocusState private var focused: Bool
+    @State private var cropping = false
     @StateObject private var recorder = VoiceRecorder()
 
     /// With nothing typed or attached, the send button records instead.
@@ -416,8 +545,18 @@ struct ComposerBar: View {
             HStack(alignment: .bottom, spacing: 8) {
                 if let onAttach {
                     Menu {
-                        Button(L("Photo or Video…"), systemImage: "photo.on.rectangle") { onAttach(true) }
-                        Button(L("File…"), systemImage: "doc") { onAttach(false) }
+                        Button(L("Photo or Video…"), systemImage: "photo.on.rectangle") { onAttach(.media) }
+                        Button(L("File…"), systemImage: "doc") { onAttach(.file) }
+                        Divider()
+                        Button(L("Sticker…"), systemImage: "face.smiling") { onAttach(.sticker) }
+                        Button(L("Poll…"), systemImage: "chart.bar") { onAttach(.poll) }
+                        Button(L("Contact…"), systemImage: "person.crop.circle") { onAttach(.contact) }
+                        Button(L("My Location"), systemImage: "location") { onAttach(.location) }
+                        Divider()
+                        Button(L("Emoji & Symbols"), systemImage: "smiley") {
+                            focused = true
+                            NSApp.orderFrontCharacterPalette(nil)
+                        }
                     } label: {
                         Image(systemName: "plus").font(.system(size: 15, weight: .medium))
                             .frame(width: Self.height, height: Self.height)
@@ -451,6 +590,11 @@ struct ComposerBar: View {
                 } else {
                 VStack(alignment: .leading, spacing: 0) {
                     context
+                    mentionSuggestions
+                    if moreCount > 0 {
+                        Text(L("+%lld more files", moreCount)).font(.caption).foregroundStyle(.secondary)
+                            .padding(.horizontal, 14).padding(.top, 6)
+                    }
                     if let error = recorder.error {
                         Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 14).padding(.top, 8)
                     }
@@ -462,6 +606,11 @@ struct ComposerBar: View {
                         .frame(minHeight: Self.height)
                         .focused($focused)
                         .onSubmit { if canSend { onSend() } }
+                        .onKeyPress(.upArrow) {
+                            guard text.isEmpty, editing == nil, let onEditLast else { return .ignored }
+                            onEditLast()
+                            return .handled
+                        }
                         .onChange(of: text) { _, new in
                             if !new.isEmpty { onTyping() }
                         }
@@ -489,6 +638,42 @@ struct ComposerBar: View {
         .onChange(of: editing?.id) { _, _ in focused = true }
         .onChange(of: image?.id) { _, _ in focused = true }
         .onChange(of: file?.id) { _, _ in focused = true }
+    }
+
+    /// The name being typed after an "@" at the end of the text, if any.
+    private var mentionQuery: String? {
+        guard !members.isEmpty, let at = text.lastIndex(of: "@") else { return nil }
+        let typed = text[text.index(after: at)...]
+        let startsWord = at == text.startIndex || text[text.index(before: at)].isWhitespace
+        guard startsWord, !typed.contains(where: \.isNewline), typed.count < 24 else { return nil }
+        return String(typed)
+    }
+
+    @ViewBuilder private var mentionSuggestions: some View {
+        if let query = mentionQuery {
+            let matches = members.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }.prefix(5)
+            if !matches.isEmpty, !matches.contains(where: { $0.name == query }) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(matches)) { member in
+                        Button {
+                            if let at = text.lastIndex(of: "@") {
+                                text = String(text[..<at]) + "@\(member.name) "
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                AvatarView(jid: member.jid, name: member.name, size: 20)
+                                Text(member.name).lineLimit(1)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 12).padding(.vertical, 4)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 6)
+            }
+        }
     }
 
     private func primaryAction() {
@@ -524,6 +709,11 @@ struct ComposerBar: View {
                 Image(nsImage: image.preview).resizable().scaledToFit()
                     .frame(maxHeight: 130)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                Button(L("Crop"), systemImage: "crop") { cropping = true }
+                    .buttonStyle(.glass)
+                    .sheet(isPresented: $cropping) {
+                        CropSheet(image: image) { self.image = $0 }
+                    }
                 Spacer()
             } onClose: {
                 self.image = nil

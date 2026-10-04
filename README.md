@@ -20,23 +20,29 @@ of the memory of the official app.
 ## Features
 
 - Chats and groups: text, photos, videos, documents, voice messages (record
-  and play), stickers, replies, reactions, edit and delete-for-everyone
+  and play), stickers, polls, contact cards, locations, replies, reactions,
+  mentions, link previews, edit and delete-for-everyone
 - Read receipts, typing indicator, online / last seen, profile photos
-- Paste or drag-and-drop photos and files to send them
-- Pin and archive chats; star, pin and forward messages; search inside a chat
+- Paste or drag-and-drop photos and files, several at a time
+- Search across all chats; jump to a chat with ⌘K
+- Pin, archive and mute chats; star, pin and forward messages; drafts
+- Disappearing messages, status updates, blocking, chat export
 - Group management: members, admins, rename, invite link, leave
 - A menu bar panel with your recent chats that you can read and answer from
   without opening the app
-- Notifications with inline reply
-- Multiple accounts
+- Notifications with inline reply, and a Do Not Disturb pause
+- App lock and per-chat lock with Touch ID
+- Multiple accounts, each with a name and an icon
+- Appearance settings: text size, accent colour, compact list
 - Updates itself from GitHub releases (each download is checked against the
   developer signature before it is installed)
 - English, Turkish, Russian, French, German, Spanish, Portuguese and Italian;
   follows the system (or per-app) language
 
 Not supported: voice and video calls (the protocol library does not implement
-call media; incoming calls are shown as a notification), status updates,
-communities and channels.
+call media; incoming calls are shown as a notification), posting status
+updates, view-once media, communities and channels. Messages are stored
+unencrypted on disk; rely on FileVault for encryption at rest.
 
 ## Install
 

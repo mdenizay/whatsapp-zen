@@ -34,6 +34,7 @@ final class AppStore: ObservableObject, Identifiable {
     init(id: String) {
         self.id = id
         nickname = UserDefaults.standard.string(forKey: "account.\(id).name") ?? ""
+        drafts = UserDefaults.standard.dictionary(forKey: "account.\(id).drafts") as? [String: String] ?? [:]
         icon = UserDefaults.standard.string(forKey: "account.\(id).icon") ?? Self.icons[0]
     }
 
@@ -70,6 +71,14 @@ final class AppStore: ObservableObject, Identifiable {
     @Published var pinnedMessages: [Message] = []
     /// A message the conversation view should scroll to and flash.
     @Published var jumpTarget: String?
+    /// Unsent text per chat.
+    @Published var drafts: [String: String] = [:]
+    /// Further files queued behind the staged attachment, sent with it.
+    @Published var pendingMore: [URL] = []
+    /// Members of the open group, for @-mentions.
+    @Published var members: [GroupMember] = []
+    /// Locked chats opened with Touch ID in this session.
+    var unlockedChats = Set<String>()
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     /// Fires with a chat JID whenever that chat's messages changed ("" = any).
@@ -255,6 +264,7 @@ final class AppStore: ObservableObject, Identifiable {
         hasMore = false
         clearDraftState()
         guard let jid else { return }
+        if let chat = chats.first(where: { $0.jid == jid }) { loadMembers(of: chat) }
         reloadMessages()
         watchPresence(of: jid)
         if isWatching { markRead(jid) }
@@ -265,6 +275,7 @@ final class AppStore: ObservableObject, Identifiable {
         editing = nil
         pendingImage = nil
         pendingFile = nil
+        pendingMore = []
     }
 
     func watchPresence(of jid: String) {
@@ -289,7 +300,10 @@ final class AppStore: ObservableObject, Identifiable {
         guard !text.isEmpty else { return }
         lastTypingSent = .distantPast
         attempt {
-            let _: Message = try await Core.call("send_text", ["chat": chat, "text": text, "reply_to": replyTo ?? ""], account: self.id)
+            let resolved = self.resolveMentions(in: text)
+            let _: Message = try await Core.call("send_text", [
+                "chat": chat, "text": resolved.text, "reply_to": replyTo ?? "", "mentions": resolved.jids,
+            ], account: self.id)
         }
     }
 
@@ -316,6 +330,23 @@ final class AppStore: ObservableObject, Identifiable {
     }
 
     /// Stages a file for the open chat: photos as photos, the rest as files.
+    /// Stages several files: the first is shown in the composer, the rest
+    /// are queued behind it and go out with the same press of Send.
+    func attach(_ urls: [URL]) {
+        guard let first = urls.first else { return }
+        pendingMore = Array(urls.dropFirst())
+        attach(first)
+    }
+
+    /// Sends one file straight away, with no caption.
+    func sendNow(_ url: URL, to chat: String) async {
+        if Attachments.isImage(url), let data = try? Data(contentsOf: url), let image = Images.prepare(data) {
+            send(image: image, caption: "", to: chat)
+        } else if let file = await Attachments.file(at: url) {
+            send(file: file, caption: "", to: chat)
+        }
+    }
+
     func attach(_ url: URL) {
         Task { @MainActor in
             if Attachments.isImage(url), let data = try? Data(contentsOf: url), let image = Images.prepare(data) {

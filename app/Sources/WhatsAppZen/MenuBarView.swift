@@ -50,7 +50,15 @@ struct MenuBarView: View {
                     LazyVStack(spacing: 2) {
                         ForEach(store.chats.filter { !$0.archived }.prefix(60)) { chat in
                             MenuChatRow(chat: chat, typing: store.typing[chat.jid] != nil, tick: store.avatarTick) {
-                                opened = chat.jid
+                                if store.isSealed(chat.jid) {
+                                    Auth.unlock(reason: L("Unlock this chat")) { ok in
+                                        guard ok else { return }
+                                        store.unlockedChats.insert(chat.jid)
+                                        opened = chat.jid
+                                    }
+                                } else {
+                                    opened = chat.jid
+                                }
                             }
                         }
                     }

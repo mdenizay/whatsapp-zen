@@ -1,0 +1,595 @@
+import AppKit
+import SwiftUI
+
+// MARK: Quick switcher (⌘K)
+
+struct QuickSwitcher: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @FocusState private var focused: Bool
+
+    private var matches: [Chat] {
+        let all = store.chats.filter { !$0.archived }
+        return Array((query.isEmpty ? all : all.filter { $0.name.localizedCaseInsensitiveContains(query) }).prefix(12))
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            TextField(L("Jump to a chat"), text: $query)
+                .textFieldStyle(.plain)
+                .font(.title3)
+                .padding(14)
+                .focused($focused)
+                .onSubmit { if let first = matches.first { pick(first) } }
+            Divider()
+            List(matches) { chat in
+                Button { pick(chat) } label: {
+                    HStack(spacing: 10) {
+                        AvatarView(jid: chat.jid, name: chat.name, size: 28, tick: store.avatarTick)
+                        Text(chat.name).lineLimit(1)
+                        Spacer()
+                        if chat.unread > 0 { UnreadBadge(count: chat.unread) }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .listStyle(.plain)
+        }
+        .frame(width: 440, height: 380)
+        .onAppear { focused = true }
+        .onExitCommand { dismiss() }
+    }
+
+    private func pick(_ chat: Chat) {
+        dismiss()
+        store.openChecked(chat.jid)
+    }
+}
+
+// MARK: Link preview
+
+struct LinkCard: View {
+    let message: Message
+    let onBubble: Bool
+
+    private var url: URL? {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return nil }
+        return detector.firstMatch(in: message.text, range: NSRange(message.text.startIndex..., in: message.text))?.url
+    }
+
+    var body: some View {
+        Button {
+            if let url { NSWorkspace.shared.open(url) }
+        } label: {
+            HStack(spacing: 9) {
+                if let image = Images.thumbnail(base64: message.thumb) {
+                    Image(nsImage: image).resizable().scaledToFill()
+                        .frame(width: 54, height: 54)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(message.linkTitle ?? "").font(.callout.weight(.semibold)).lineLimit(2)
+                    if let desc = message.linkDesc, !desc.isEmpty {
+                        Text(desc).font(.caption).lineLimit(2).opacity(0.8)
+                    }
+                    if let host = url?.host() {
+                        Text(host).font(.caption2).opacity(0.65)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(7)
+            .frame(maxWidth: 320, alignment: .leading)
+            .background(onBubble ? .black.opacity(0.14) : .primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: Polls
+
+struct PollView: View {
+    @EnvironmentObject var store: AppStore
+    let message: Message
+    let poll: Poll
+    let onBubble: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Label(message.text, systemImage: "chart.bar.fill").font(.callout.weight(.semibold))
+            ForEach(poll.options) { option in
+                Button { store.vote(message, option: option.name) } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            Image(systemName: option.mine ? "checkmark.circle.fill" : "circle")
+                            Text(option.name).lineLimit(2)
+                            Spacer(minLength: 8)
+                            Text("\(option.votes)").monospacedDigit().opacity(0.8)
+                        }
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(onBubble ? .white.opacity(0.25) : .primary.opacity(0.12))
+                                Capsule().fill(onBubble ? .white : Theme.accent)
+                                    .frame(width: geo.size.width * (poll.voters > 0 ? CGFloat(option.votes) / CGFloat(poll.voters) : 0))
+                            }
+                        }
+                        .frame(height: 4)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(width: 250, alignment: .leading)
+    }
+}
+
+struct PollComposer: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    let chat: Chat
+
+    @State private var question = ""
+    @State private var options = ["", "", ""]
+
+    private var filled: [String] {
+        options.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L("New Poll")).font(.headline)
+            TextField(L("Question"), text: $question).textFieldStyle(.roundedBorder)
+            ForEach(options.indices, id: \.self) { index in
+                TextField(L("Option"), text: $options[index]).textFieldStyle(.roundedBorder)
+            }
+            Button(L("Add Option"), systemImage: "plus") { options.append("") }
+                .buttonStyle(.link)
+                .disabled(options.count >= 12)
+            HStack {
+                Spacer()
+                Button(L("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(L("Send")) {
+                    store.sendPoll(question: question, options: filled, to: chat.jid)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(question.trimmingCharacters(in: .whitespaces).isEmpty || filled.count < 2)
+            }
+        }
+        .padding(18)
+        .frame(width: 380)
+    }
+}
+
+// MARK: Stickers
+
+/// Stickers you have received, to send again.
+struct StickerPicker: View {
+    @EnvironmentObject var store: AppStore
+    let chat: Chat
+    let close: () -> Void
+
+    @State private var stickers: [Message] = []
+    @State private var loaded = false
+
+    var body: some View {
+        Group {
+            if stickers.isEmpty {
+                Text(loaded ? L("Stickers you receive show up here.") : L("Loading…"))
+                    .foregroundStyle(.secondary).multilineTextAlignment(.center).padding()
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: Array(repeating: GridItem(.fixed(72)), count: 4), spacing: 8) {
+                        ForEach(stickers) { sticker in
+                            StickerCell(message: sticker) {
+                                store.sendSticker(sticker, to: chat.jid)
+                                close()
+                            }
+                        }
+                    }
+                    .padding(10)
+                }
+            }
+        }
+        .frame(width: 340, height: 320)
+        .task {
+            stickers = await store.stickers()
+            loaded = true
+        }
+    }
+}
+
+private struct StickerCell: View {
+    let message: Message
+    let pick: () -> Void
+    @State private var image: NSImage?
+
+    var body: some View {
+        Button(action: pick) {
+            ZStack {
+                if let image {
+                    Image(nsImage: image).resizable().scaledToFit()
+                } else {
+                    RoundedRectangle(cornerRadius: 8).fill(.quaternary)
+                }
+            }
+            .frame(width: 72, height: 72)
+        }
+        .buttonStyle(.plain)
+        .task {
+            let path: String? = (message.mediaPath?.isEmpty == false) ? message.mediaPath
+                : try? await Core.call("download", ["chat": message.chat, "id": message.id])
+            if let path { image = await Images.load(path: path, maxPixel: 160) }
+        }
+    }
+}
+
+// MARK: Status
+
+/// Status updates of the last 24 hours, grouped by person.
+struct StatusSheet: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var statuses: [Message] = []
+    @State private var loaded = false
+
+    private var people: [(jid: String, name: String, items: [Message])] {
+        Dictionary(grouping: statuses, by: \.sender)
+            .map { (jid: $0.key, name: $0.value.first?.fromMe == true ? L("You") : ($0.value.first?.senderName ?? ""), items: $0.value) }
+            .sorted { ($0.items.last?.ts ?? 0) > ($1.items.last?.ts ?? 0) }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(L("Status")).font(.headline)
+                Spacer()
+                Button(L("Close")) { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            .padding(14)
+            if statuses.isEmpty {
+                Text(loaded ? L("No status updates in the last 24 hours.") : L("Loading…"))
+                    .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        ForEach(people, id: \.jid) { person in
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 8) {
+                                    AvatarView(jid: person.jid, name: person.name, size: 28, tick: store.avatarTick)
+                                    Text(person.name).fontWeight(.semibold)
+                                    Text(Format.time(person.items.last?.date ?? Date())).font(.caption).foregroundStyle(.secondary)
+                                }
+                                ForEach(person.items) { item in
+                                    MessageRow(message: item, showSender: false, endsGroup: true, highlighted: false, maxWidth: 360,
+                                               actions: MessageActions(reply: { _ in }, preview: { store.previewURL = URL(fileURLWithPath: $0) }))
+                                }
+                            }
+                        }
+                    }
+                    .padding(14)
+                }
+            }
+        }
+        .frame(width: 460, height: 560)
+        .task {
+            statuses = await store.statuses()
+            loaded = true
+        }
+    }
+}
+
+// MARK: Chat info
+
+/// About a contact or group: settings for the chat and what was shared in it.
+struct ChatInfoSheet: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    let chat: Chat
+    /// Opens member management for groups.
+    let manageGroup: () -> Void
+
+    @State private var info: UserInfo?
+    @State private var kind = "media"
+    @State private var items: [Message] = []
+
+    private var current: Chat { store.chats.first { $0.jid == chat.jid } ?? chat }
+
+    private static let timers: [(String, Int)] = [("Off", 0), ("24 hours", 86400), ("7 days", 604_800), ("90 days", 7_776_000)]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                AvatarView(jid: chat.jid, name: chat.name, size: 56, tick: store.avatarTick)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(chat.name).font(.title3.weight(.semibold))
+                    if !chat.isGroup {
+                        Text("+" + (chat.jid.split(separator: "@").first ?? "")).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
+                    if let about = info?.about, !about.isEmpty {
+                        Text(about).font(.callout).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                }
+                Spacer()
+                Button(L("Close")) { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            .padding(14)
+
+            HStack(spacing: 8) {
+                Menu {
+                    if current.muted {
+                        Button(L("Unmute")) { store.mute(current, seconds: 0) }
+                    } else {
+                        Button(L("8 hours")) { store.mute(current, seconds: 8 * 3600) }
+                        Button(L("1 week")) { store.mute(current, seconds: 7 * 86400) }
+                        Button(L("Always")) { store.mute(current, seconds: -1) }
+                    }
+                } label: {
+                    Label(current.muted ? L("Muted") : L("Mute"), systemImage: current.muted ? "bell.slash.fill" : "bell.slash")
+                }
+                Menu {
+                    ForEach(Self.timers, id: \.1) { title, seconds in
+                        Button {
+                            store.setDisappearing(current, seconds: seconds)
+                        } label: {
+                            Label(L(title), systemImage: current.ephemeral == seconds ? "checkmark" : "timer")
+                        }
+                    }
+                } label: {
+                    Label(L("Disappearing"), systemImage: current.ephemeral > 0 ? "timer.circle.fill" : "timer")
+                }
+                Toggle(isOn: Binding(get: { store.isLocked(chat.jid) }, set: { store.setLocked(chat.jid, $0) })) {
+                    Label(L("Lock"), systemImage: "lock")
+                }
+                .toggleStyle(.button)
+                Spacer()
+                Menu {
+                    Button(L("Export Chat…"), systemImage: "square.and.arrow.up") { store.export(chat) }
+                    if chat.isGroup {
+                        Button(L("Members…"), systemImage: "person.2") {
+                            dismiss()
+                            manageGroup()
+                        }
+                    } else if let info {
+                        Button(info.blocked ? L("Unblock") : L("Block"), systemImage: "hand.raised", role: info.blocked ? nil : .destructive) {
+                            Task { @MainActor in
+                                await store.block(chat.jid, !info.blocked)
+                                self.info = await store.userInfo(chat.jid)
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuIndicator(.hidden)
+                .fixedSize()
+            }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 10)
+
+            Picker(L("Shared"), selection: $kind) {
+                Text(L("Media")).tag("media")
+                Text(L("Documents")).tag("docs")
+                Text(L("Links")).tag("links")
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 14)
+
+            Group {
+                if items.isEmpty {
+                    Text(L("Nothing here yet")).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if kind == "media" {
+                    ScrollView {
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 4), spacing: 4) {
+                            ForEach(items) { item in
+                                MediaTile(message: item) { reveal(item) }
+                            }
+                        }
+                        .padding(14)
+                    }
+                } else {
+                    MessageResults(messages: items, empty: "") { reveal($0) }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(width: 500, height: 560)
+        .task { if !chat.isGroup { info = await store.userInfo(chat.jid) } }
+        .task(id: kind) { items = await store.media(chat: chat.jid, kind: kind) }
+    }
+
+    private func reveal(_ message: Message) {
+        dismiss()
+        store.reveal(message)
+    }
+}
+
+private struct MediaTile: View {
+    let message: Message
+    let pick: () -> Void
+
+    var body: some View {
+        Button(action: pick) {
+            ZStack {
+                if let image = Images.thumbnail(base64: message.thumb) {
+                    Image(nsImage: image).resizable().scaledToFill()
+                } else {
+                    Rectangle().fill(.quaternary)
+                }
+                if message.type == "video" {
+                    Image(systemName: "play.fill").foregroundStyle(.white).shadow(radius: 2)
+                }
+            }
+            .frame(minWidth: 0, maxWidth: .infinity)
+            .aspectRatio(1, contentMode: .fill)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: App lock
+
+/// Covers the app until Touch ID (or the password) unlocks it.
+struct LockView: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "lock.fill").font(.system(size: 40)).foregroundStyle(Theme.accent)
+            Text(L("WhatsApp Zen is locked")).font(.title3.weight(.semibold))
+            Button(L("Unlock")) { model.unlock() }
+                .buttonStyle(.glassProminent)
+                .tint(Theme.accent)
+                .keyboardShortcut(.defaultAction)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.regularMaterial)
+        .onAppear { model.unlock() }
+    }
+}
+
+// MARK: Release notes
+
+struct ReleaseNotesSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let notes: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L("What's New in %@", Links.version)).font(.title2.weight(.semibold))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(notes.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
+                        if line.hasPrefix("- ") {
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Text("•").foregroundStyle(Theme.accent)
+                                Text(LocalizedStringKey(String(line.dropFirst(2))))
+                            }
+                        } else if !line.isEmpty {
+                            Text(LocalizedStringKey(line)).fontWeight(.semibold).padding(.top, 4)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            HStack {
+                Spacer()
+                Button(L("Done")) { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 460, height: 420)
+    }
+}
+
+// MARK: Settings panes
+
+struct AppearanceSettings: View {
+    @ObservedObject private var prefs = Prefs.shared
+
+    var body: some View {
+        Form {
+            Section {
+                HStack {
+                    Text(L("Text Size"))
+                    Slider(value: $prefs.fontSize, in: 11...18, step: 1)
+                    Text("\(Int(prefs.fontSize))").monospacedDigit().foregroundStyle(.secondary).frame(width: 22)
+                }
+                Toggle(L("Compact chat list"), isOn: $prefs.compact)
+            }
+            Section(L("Accent Color")) {
+                HStack(spacing: 10) {
+                    ForEach(Prefs.accents, id: \.id) { entry in
+                        Button { prefs.accent = entry.id } label: {
+                            Circle().fill(Color(light: entry.light, dark: entry.dark)).frame(width: 24, height: 24)
+                                .overlay(Circle().strokeBorder(.primary, lineWidth: prefs.accent == entry.id ? 2 : 0).padding(-3))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            Section(L("Menu Bar")) {
+                Toggle(L("Show unread count in the menu bar"), isOn: $prefs.menuBarCount)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+struct PrivacySettings: View {
+    @ObservedObject private var prefs = Prefs.shared
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle(L("Lock the app with Touch ID"), isOn: $prefs.appLock)
+                Picker(L("Lock after"), selection: $prefs.lockAfter) {
+                    Text(L("Immediately")).tag(0)
+                    Text(L("1 minute")).tag(1)
+                    Text(L("5 minutes")).tag(5)
+                    Text(L("15 minutes")).tag(15)
+                    Text(L("1 hour")).tag(60)
+                }
+                .disabled(!prefs.appLock)
+            } footer: {
+                Text(L("Single chats can be locked from their info panel. Locked chats hide their previews and need Touch ID to open."))
+            }
+            Section {
+                Text(L("Messages are stored unencrypted in your Library folder. Turn on FileVault in System Settings to encrypt the disk they are on."))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+struct StorageSettings: View {
+    @EnvironmentObject var model: AppModel
+    @ObservedObject private var prefs = Prefs.shared
+    @State private var bytes = 0
+    @State private var busy = false
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle(L("Download photos automatically"), isOn: $prefs.autoDownload)
+            } footer: {
+                Text(L("When off, a photo is downloaded when you click it."))
+            }
+            Section {
+                HStack {
+                    Text(L("Downloaded media"))
+                    Spacer()
+                    Text(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)).foregroundStyle(.secondary)
+                    Button(L("Clear")) {
+                        busy = true
+                        Task { @MainActor in
+                            for account in model.accounts { await account.clearCache() }
+                            await measure()
+                            busy = false
+                        }
+                    }
+                    .disabled(busy || bytes == 0)
+                }
+            } footer: {
+                Text(L("Media still on WhatsApp's servers is downloaded again when you look at it."))
+            }
+        }
+        .formStyle(.grouped)
+        .task { await measure() }
+    }
+
+    @MainActor private func measure() async {
+        var total = 0
+        for account in model.accounts { total += await account.cacheSize() }
+        bytes = total
+    }
+}

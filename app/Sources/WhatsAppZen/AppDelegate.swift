@@ -40,6 +40,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             .removeDuplicates()
             .sink { [weak self] unread in self?.showUnread(unread) }
             .store(in: &subscriptions)
+        Prefs.shared.$menuBarCount
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.showUnread(self?.model.totalUnread ?? 0) }
+            .store(in: &subscriptions)
         model.incoming
             .sink { Notifier.shared.post(account: $0.account, chat: $0.chat, chatName: $0.chatName, message: $0.message) }
             .store(in: &subscriptions)
@@ -165,6 +169,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// The menu bar shows no count; the icon turns green while something is unread.
     private func showUnread(_ unread: Int) {
         statusItem.button?.image = Self.statusIcon(unread: unread > 0)
+        statusItem.button?.imagePosition = .imageLeading
+        statusItem.button?.title = Prefs.shared.menuBarCount && unread > 0 ? " \(unread)" : ""
         NSApp.dockTile.badgeLabel = unread > 0 ? "\(unread)" : nil
     }
 
@@ -323,7 +329,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         win.addItem(.separator())
         win.addItem(withTitle: "WhatsApp", action: #selector(AppDelegate.showMainWindow), keyEquivalent: "0")
 
-        for menu in [app, edit, win] {
+        let go = NSMenu(title: L("Go"))
+        go.addItem(withTitle: L("Jump to a chat"), action: #selector(AppDelegate.showSwitcher), keyEquivalent: "k")
+        go.addItem(withTitle: L("New Chat"), action: #selector(AppDelegate.showNewChat), keyEquivalent: "n")
+        go.addItem(withTitle: L("Status"), action: #selector(AppDelegate.showStatus), keyEquivalent: "S")
+        go.addItem(.separator())
+        let previous = go.addItem(withTitle: L("Previous Chat"), action: #selector(AppDelegate.previousChat), keyEquivalent: String(UnicodeScalar(NSUpArrowFunctionKey)!))
+        previous.keyEquivalentModifierMask = [.command, .option]
+        let next = go.addItem(withTitle: L("Next Chat"), action: #selector(AppDelegate.nextChat), keyEquivalent: String(UnicodeScalar(NSDownArrowFunctionKey)!))
+        next.keyEquivalentModifierMask = [.command, .option]
+        go.addItem(.separator())
+        for number in 1...9 {
+            let item = go.addItem(withTitle: L("Chat %lld", number), action: #selector(AppDelegate.openNumberedChat(_:)), keyEquivalent: "\(number)")
+            item.tag = number - 1
+        }
+
+        for menu in [app, edit, go, win] {
             let item = NSMenuItem()
             item.submenu = menu
             main.addItem(item)
@@ -333,6 +354,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc func showMainWindow() { showWindow() }
+
+    @objc func showSwitcher() {
+        showWindow()
+        model.showingSwitcher = true
+    }
+
+    @objc func showNewChat() {
+        showWindow()
+        model.showingNewChat = true
+    }
+
+    @objc func showStatus() {
+        showWindow()
+        model.showingStatus = true
+    }
+
+    @objc func previousChat() { model.stepChat(-1) }
+    @objc func nextChat() { model.stepChat(1) }
+    @objc func openNumberedChat(_ sender: NSMenuItem) { model.openChat(at: sender.tag) }
 
     @objc func showSettings() {
         showWindow()
@@ -368,10 +408,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 /// Shows `content` for the active account, rebuilt when the account changes.
 struct RootView<Content: View>: View {
     @EnvironmentObject var model: AppModel
+    /// Observed so a change of accent colour or text size redraws everything.
+    @ObservedObject private var prefs = Prefs.shared
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        if let store = model.active {
+        if model.locked {
+            LockView()
+        } else if let store = model.active {
             content().environmentObject(store).id(store.id)
         }
     }

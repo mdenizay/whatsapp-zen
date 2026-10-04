@@ -37,7 +37,15 @@ if [ "$NOTARIZED" != yes ]; then
 fi
 SHA="$(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
 
-gh release create "v$VERSION" "$ZIP" --repo "$REPO" --title "v$VERSION" --generate-notes
+# Release notes: this version's section of the change log.
+NOTES="$(mktemp)"
+awk -v v="## $VERSION" '$0 == v {on = 1; next} /^## / {on = 0} on' "$ROOT/CHANGELOG.md" > "$NOTES"
+if [ -s "$NOTES" ]; then
+    gh release create "v$VERSION" "$ZIP" --repo "$REPO" --title "v$VERSION" --notes-file "$NOTES"
+else
+    gh release create "v$VERSION" "$ZIP" --repo "$REPO" --title "v$VERSION" --generate-notes
+fi
+rm -f "$NOTES"
 
 WORK="$(mktemp -d)"
 gh repo clone "$TAP" "$WORK/tap"

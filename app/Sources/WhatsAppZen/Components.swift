@@ -14,9 +14,15 @@ extension Color {
 }
 
 enum Theme {
-    static let accent = Color(light: 0x1DAA61, dark: 0x25C46B)
+    static var accent: Color {
+        let entry = Prefs.shared.accentEntry
+        return Color(light: entry.light, dark: entry.dark)
+    }
     /// Outgoing bubbles carry white text, so this stays dark enough in both modes.
-    static let bubbleOut = Color(light: 0x1A9F5A, dark: 0x1B8A50)
+    static var bubbleOut: Color {
+        let entry = Prefs.shared.accentEntry
+        return Color(light: entry.bubbleLight, dark: entry.bubbleDark)
+    }
     static let bubbleIn = Color(light: 0xECECEF, dark: 0x2B2B2F)
     static let readTick = Color(light: 0x2E9BE6, dark: 0x5CC4F5)
     /// Read ticks on top of the green outgoing bubble.

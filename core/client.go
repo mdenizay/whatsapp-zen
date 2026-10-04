@@ -346,7 +346,7 @@ func (a *App) setGroupName(x execer, jid, name string) {
 // chats, starred messages) once, for databases paired before those were
 // stored. The replay arrives as ordinary Archive/Pin/Star events.
 func (a *App) resyncSettings(cli *whatsmeow.Client) {
-	marker := filepath.Join(a.dir, ".settings-synced")
+	marker := filepath.Join(a.dir, ".settings-synced-2")
 	if _, err := os.Stat(marker); err == nil {
 		return
 	}
@@ -406,6 +406,12 @@ func (a *App) handle(raw any) {
 		if was == "connected" {
 			a.setState("connecting", "")
 		}
+	case *events.UndecryptableMessage:
+		// View-once media is never delivered to linked devices; say that one
+		// arrived so it is not missed.
+		if evt.IsUnavailable && evt.UnavailableType == events.UnavailableTypeViewOnce {
+			a.onViewOnce(&evt.Info)
+		}
 	case *events.CallOffer:
 		// Calls cannot be answered here; tell the UI so it can point the user
 		// at the phone and offer to decline.
@@ -438,6 +444,13 @@ func (a *App) handle(raw any) {
 		a.emit(map[string]any{"type": "chats"})
 	case *events.Pin:
 		a.db.Exec(`UPDATE chats SET pinned=? WHERE jid=?`, evt.Action.GetPinned(), a.pn(evt.JID).String())
+		a.emit(map[string]any{"type": "chats"})
+	case *events.Mute:
+		until := int64(0)
+		if evt.Action.GetMuted() {
+			until = muteUntil(evt.Action.GetMuteEndTimestamp())
+		}
+		a.db.Exec(`UPDATE chats SET muted_until=? WHERE jid=?`, until, a.pn(evt.JID).String())
 		a.emit(map[string]any{"type": "chats"})
 	case *events.Star:
 		chat := a.pn(evt.ChatJID).String()
@@ -541,7 +554,7 @@ func extract(m *waE2E.Message) *extracted {
 		if x == nil {
 			x = m.GetPollCreationMessageV3()
 		}
-		return &extracted{typ: "other", text: "📊 " + T("Poll") + ": " + x.GetName()}
+		return &extracted{typ: "poll", text: x.GetName(), ctx: x.GetContextInfo()}
 	case m.GetGroupInviteMessage() != nil:
 		return &extracted{typ: "other", text: "✉️ " + T("Group invite") + ": " + m.GetGroupInviteMessage().GetGroupName()}
 	case m.GetCall() != nil:
@@ -597,10 +610,14 @@ func (a *App) buildRow(evt *events.Message, chat, sender types.JID) *row {
 
 func (a *App) onMessage(evt *events.Message) {
 	chat, sender := a.resolve(&evt.Info)
-	if !isChatJID(chat) || evt.Message == nil {
+	if (!isChatJID(chat) && chat.String() != statusChat) || evt.Message == nil {
 		return
 	}
 	cs := chat.String()
+	if pu := evt.Message.GetPollUpdateMessage(); pu != nil {
+		a.onPollVote(evt, cs, sender.String())
+		return
+	}
 
 	if p := evt.Message.GetPinInChatMessage(); p != nil {
 		pinned := p.GetType() == waE2E.PinInChatMessage_PIN_FOR_ALL
@@ -643,6 +660,12 @@ func (a *App) onMessage(evt *events.Message) {
 	if err != nil || !inserted {
 		return
 	}
+	a.decorate(a.db, r, evt.Message)
+	if cs == statusChat {
+		// A status update: kept for the Status view, not a conversation.
+		a.emit(map[string]any{"type": "messages", "chat": cs})
+		return
+	}
 	touchChat(a.db, cs, r.TS)
 	if r.FromMe {
 		// Sent from the phone or another device: the chat has been seen there.
@@ -653,7 +676,7 @@ func (a *App) onMessage(evt *events.Message) {
 	}
 	a.emit(map[string]any{
 		"type": "message", "chat": cs, "chat_name": a.nameOf(cs), "msg": a.getMessage(cs, r.ID),
-		"notify": !r.FromMe && time.Since(evt.Info.Timestamp) < 2*time.Minute,
+		"notify": !r.FromMe && time.Since(evt.Info.Timestamp) < 2*time.Minute && !a.isMuted(cs),
 	})
 }
 
@@ -706,7 +729,8 @@ func (a *App) onHistory(evt *events.HistorySync) {
 		if chat.Server == types.GroupServer {
 			a.setGroupName(tx, cs, conv.GetName())
 		}
-		tx.Exec(`UPDATE chats SET archived=?, pinned=? WHERE jid=?`, conv.GetArchived(), conv.GetPinned() > 0, cs)
+		tx.Exec(`UPDATE chats SET archived=?, pinned=?, ephemeral=?, muted_until=? WHERE jid=?`,
+			conv.GetArchived(), conv.GetPinned() > 0, conv.GetEphemeralExpiration(), muteUntil(int64(conv.GetMuteEndTime())), cs)
 
 		for _, hm := range conv.GetMessages() {
 			wm := hm.GetMessage()
@@ -724,6 +748,7 @@ func (a *App) onHistory(evt *events.HistorySync) {
 				r.Status = min(max(int(wm.GetStatus())-1, statusSent), statusRead)
 			}
 			if ok, _ := insertMessage(tx, r); ok {
+				a.decorate(tx, r, pm.Message)
 				if wm.GetStarred() {
 					tx.Exec(`UPDATE messages SET starred=1 WHERE chat=? AND id=?`, cs, r.ID)
 				}

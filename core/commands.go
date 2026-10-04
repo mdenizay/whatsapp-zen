@@ -19,31 +19,37 @@ import (
 
 // Req is a command from the UI. Only the fields a command needs are set.
 type Req struct {
-	Cmd      string `json:"cmd"`
-	Chat     string `json:"chat"`
-	ID       string `json:"id"`
-	JID      string `json:"jid"`
-	Text     string `json:"text"`
-	Path     string `json:"path"`
-	Thumb    string `json:"thumb"`
-	ReplyTo  string `json:"reply_to"`
-	Emoji    string `json:"emoji"`
-	On       bool   `json:"on"`
-	W        int    `json:"w"`
-	H        int    `json:"h"`
-	Limit    int    `json:"limit"`
-	BeforeTS int64  `json:"before_ts"`
-	BeforeID string `json:"before_id"`
-	Kind     string `json:"kind"`
-	Mime     string `json:"mime"`
-	FileName string `json:"file_name"`
-	Seconds  int    `json:"seconds"`
-	Phone    string `json:"phone"`
-	Account  string `json:"account"`
-	Unlink   bool   `json:"unlink"`
-	To       string `json:"to"`
-	Action   string `json:"action"`
-	TS       int64  `json:"ts"`
+	Cmd      string   `json:"cmd"`
+	Chat     string   `json:"chat"`
+	ID       string   `json:"id"`
+	JID      string   `json:"jid"`
+	Text     string   `json:"text"`
+	Path     string   `json:"path"`
+	Thumb    string   `json:"thumb"`
+	ReplyTo  string   `json:"reply_to"`
+	Emoji    string   `json:"emoji"`
+	On       bool     `json:"on"`
+	W        int      `json:"w"`
+	H        int      `json:"h"`
+	Limit    int      `json:"limit"`
+	BeforeTS int64    `json:"before_ts"`
+	BeforeID string   `json:"before_id"`
+	Kind     string   `json:"kind"`
+	Mime     string   `json:"mime"`
+	FileName string   `json:"file_name"`
+	Seconds  int      `json:"seconds"`
+	Phone    string   `json:"phone"`
+	Account  string   `json:"account"`
+	Unlink   bool     `json:"unlink"`
+	To       string   `json:"to"`
+	Options  []string `json:"options"`
+	Mentions []string `json:"mentions"`
+	Seconds2 int      `json:"duration"`
+	Lat      float64  `json:"lat"`
+	Lng      float64  `json:"lng"`
+	Plain    bool     `json:"plain"`
+	Action   string   `json:"action"`
+	TS       int64    `json:"ts"`
 }
 
 func (a *App) dispatch(r *Req) (any, error) {
@@ -55,7 +61,7 @@ func (a *App) dispatch(r *Req) (any, error) {
 	case "messages":
 		return a.getMessages(r.Chat, r.BeforeTS, r.BeforeID, r.Limit)
 	case "send_text":
-		return a.sendText(r.Chat, r.Text, r.ReplyTo)
+		return a.sendText(r.Chat, r.Text, r.ReplyTo, r.Mentions)
 	case "send_image":
 		return a.sendImage(r)
 	case "send_file":
@@ -87,7 +93,37 @@ func (a *App) dispatch(r *Req) (any, error) {
 		err := a.db.QueryRow(`SELECT COUNT(*) FROM messages WHERE chat=? AND ts>=?`, r.Chat, r.TS).Scan(&n)
 		return n, err
 	case "forward":
-		return a.forward(r.Chat, r.ID, r.To)
+		return a.forward(r.Chat, r.ID, r.To, r.Plain)
+	case "search_all":
+		return a.searchAll(r.Text)
+	case "mute":
+		return nil, a.mute(r.Chat, r.Seconds2)
+	case "set_ephemeral":
+		return nil, a.setEphemeral(r.Chat, r.Seconds2)
+	case "send_poll":
+		return a.sendPoll(r.Chat, r.Text, r.Options)
+	case "vote":
+		return nil, a.vote(r.Chat, r.ID, r.Options)
+	case "send_contact":
+		return a.sendContact(r.Chat, r.JID, r.Text)
+	case "send_location":
+		return a.sendLocation(r.Chat, r.Lat, r.Lng)
+	case "statuses":
+		return a.queryMessages(`chat=? AND deleted=0 AND ts > strftime('%s','now') - 86400 ORDER BY ts`, statusChat)
+	case "stickers":
+		return a.queryMessages(`type='sticker' AND deleted=0 AND raw IS NOT NULL AND chat != ? ORDER BY ts DESC LIMIT 48`, statusChat)
+	case "chat_media":
+		return a.chatMedia(r.Chat, r.Kind)
+	case "user_info":
+		return a.userInfo(r.JID)
+	case "block":
+		return nil, a.block(r.JID, r.On)
+	case "export":
+		return nil, a.export(r.Chat, r.Path)
+	case "cache_size":
+		return dirSize(filepath.Join(a.dir, "media")), nil
+	case "clear_cache":
+		return nil, a.clearCache()
 	case "send_voice":
 		return a.sendVoice(r)
 	case "group_info":
@@ -175,6 +211,7 @@ func (a *App) deliver(cli *whatsmeow.Client, to types.JID, r *row, build func() 
 		st := statusSent
 		msg, err := build()
 		if err == nil {
+			a.applyExpiration(r, msg)
 			if r.Type != "text" {
 				// Kept so the media can be fetched again if the local copy goes.
 				raw, _ := proto.Marshal(msg)
@@ -201,7 +238,7 @@ func (a *App) newRow(cli *whatsmeow.Client, chat types.JID, typ, text string) *r
 	}
 }
 
-func (a *App) sendText(chat, text, replyTo string) (*MsgJSON, error) {
+func (a *App) sendText(chat, text, replyTo string, mentions []string) (*MsgJSON, error) {
 	cli, err := a.online()
 	if err != nil {
 		return nil, err
@@ -213,14 +250,26 @@ func (a *App) sendText(chat, text, replyTo string) (*MsgJSON, error) {
 	if strings.TrimSpace(text) == "" {
 		return nil, errors.New("Empty message")
 	}
-	r := a.newRow(cli, jid, "text", text)
-	msg := &waE2E.Message{}
-	if ctx := a.replyContext(r, replyTo); ctx != nil {
-		msg.ExtendedTextMessage = &waE2E.ExtendedTextMessage{Text: proto.String(text), ContextInfo: ctx}
-	} else {
-		msg.Conversation = proto.String(text)
+	r := a.newRow(cli, jid, "text", a.mentionNames(text, mentions))
+	ctx := a.replyContext(r, replyTo)
+	if len(mentions) > 0 {
+		if ctx == nil {
+			ctx = &waE2E.ContextInfo{}
+		}
+		ctx.MentionedJID = mentions
 	}
-	return a.deliver(cli, jid, r, func() (*waE2E.Message, error) { return msg, nil })
+	return a.deliver(cli, jid, r, func() (*waE2E.Message, error) {
+		ext := &waE2E.ExtendedTextMessage{Text: proto.String(text), ContextInfo: ctx}
+		// A link gets its title, description and picture, like the phone adds.
+		if p := fetchLinkPreview(text); p != nil {
+			ext.MatchedText, ext.Title, ext.Description = proto.String(p.url), proto.String(p.title), proto.String(p.desc)
+			ext.JPEGThumbnail = p.thumb
+			a.db.Exec(`UPDATE messages SET link_title=?, link_desc=?, thumb=? WHERE chat=? AND id=?`, p.title, p.desc, p.thumb, r.Chat, r.ID)
+		} else if ctx == nil {
+			return &waE2E.Message{Conversation: proto.String(text)}, nil
+		}
+		return &waE2E.Message{ExtendedTextMessage: ext}, nil
+	})
 }
 
 // sendImage uploads a JPEG prepared by the UI (path, thumbnail and size) and

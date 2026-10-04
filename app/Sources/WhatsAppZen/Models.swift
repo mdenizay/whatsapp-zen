@@ -32,6 +32,9 @@ struct Chat: Decodable, Identifiable, Equatable {
     let lastFile: String
     let archived: Bool
     let pinned: Bool
+    var muted = false
+    /// Disappearing-message timer in seconds; 0 when off.
+    var ephemeral = 0
 
     var id: String { jid }
 
@@ -72,6 +75,10 @@ struct Message: Decodable, Identifiable, Equatable {
     let deleted: Bool
     let starred: Bool
     let pinned: Bool
+    var linkTitle: String?
+    var linkDesc: String?
+    var mentionsMe = false
+    var poll: Poll?
     let reactions: [Reaction]
 
     var date: Date { Date(timeIntervalSince1970: TimeInterval(ts)) }
@@ -89,6 +96,7 @@ struct Message: Decodable, Identifiable, Equatable {
         case "audio": return L("🎤 Voice message")
         case "document": return "📄 \(fileName)"
         case "sticker": return L("Sticker")
+        case "poll": return "📊 \(text)"
         default: return ""
         }
     }

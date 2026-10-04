@@ -5,5 +5,7 @@
     <!-- Under the hardened runtime (required for notarization) the microphone
          needs this, or voice message recording is refused without a prompt. -->
     <key>com.apple.security.device.audio-input</key><true/>
+    <!-- Sending your location from the + menu. -->
+    <key>com.apple.security.personal-information.location</key><true/>
 </dict>
 </plist>

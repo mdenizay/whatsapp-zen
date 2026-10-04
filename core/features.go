@@ -137,7 +137,7 @@ func (a *App) search(chat, text string) ([]*MsgJSON, error) {
 
 // forward re-sends a stored message to another chat, marked as forwarded.
 // Media is not uploaded again: the original's encrypted file is referenced.
-func (a *App) forward(chat, id, to string) (*MsgJSON, error) {
+func (a *App) forward(chat, id, to string, plain bool) (*MsgJSON, error) {
 	cli, dest, err := a.target(to)
 	if err != nil {
 		return nil, err
@@ -148,6 +148,10 @@ func (a *App) forward(chat, id, to string) (*MsgJSON, error) {
 		return nil, err
 	}
 	fwd := &waE2E.ContextInfo{IsForwarded: proto.Bool(true), ForwardingScore: proto.Uint32(1)}
+	if plain {
+		// Sending a saved sticker again is not a forward.
+		fwd = nil
+	}
 	msg := &waE2E.Message{}
 	if len(src.Raw) > 0 {
 		if err := proto.Unmarshal(src.Raw, msg); err != nil {

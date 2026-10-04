@@ -19,11 +19,26 @@ struct SettingsView: View {
     @State private var pane = Pane.general
 
     private enum Pane: CaseIterable {
-        case general, notifications, accounts, about
+        case general, appearance, notifications, privacy, storage, accounts, about
+
+        var icon: String {
+            switch self {
+            case .general: return "gearshape"
+            case .appearance: return "paintpalette"
+            case .notifications: return "bell.badge"
+            case .privacy: return "lock"
+            case .storage: return "internaldrive"
+            case .accounts: return "person.2"
+            case .about: return "info.circle"
+            }
+        }
 
         var title: String {
             switch self {
             case .general: return L("General")
+            case .appearance: return L("Appearance")
+            case .privacy: return L("Privacy")
+            case .storage: return L("Storage")
             case .notifications: return L("Notifications")
             case .accounts: return L("Accounts")
             case .about: return L("About")
@@ -32,23 +47,36 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(L("Settings")).font(.headline)
+        HStack(spacing: 0) {
+            // Panes down the side: seven of them do not fit across the top.
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L("Settings")).font(.headline).padding(.horizontal, 10).padding(.bottom, 8)
+                ForEach(Pane.allCases, id: \.self) { item in
+                    Button { pane = item } label: {
+                        Label(item.title, systemImage: item.icon)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(pane == item ? AnyShapeStyle(Theme.accent.opacity(0.18)) : AnyShapeStyle(.clear),
+                                        in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
                 Spacer()
-                Button(L("Done")) { model.showingSettings = false }.keyboardShortcut(.defaultAction)
+                Button(L("Done")) { model.showingSettings = false }
+                    .keyboardShortcut(.defaultAction)
+                    .padding(.horizontal, 10)
             }
-            .padding([.horizontal, .top], 16)
-            Picker(L("Settings"), selection: $pane) {
-                ForEach(Pane.allCases, id: \.self) { Text($0.title) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
+            .padding(.vertical, 16)
+            .padding(.horizontal, 8)
+            .frame(width: 170)
+            .background(.quaternary.opacity(0.4))
             Group {
                 switch pane {
                 case .general: GeneralSettings()
+                case .appearance: AppearanceSettings()
+                case .privacy: PrivacySettings()
+                case .storage: StorageSettings()
                 case .notifications: NotificationSettings()
                 case .accounts: AccountSettings()
                 case .about: AboutSettings()
@@ -56,7 +84,7 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 560, height: 430)
+        .frame(width: 600, height: 440)
         .tint(Theme.accent)
     }
 }
@@ -107,6 +135,7 @@ private struct GeneralSettings: View {
 
 private struct NotificationSettings: View {
     @ObservedObject private var notifier = Notifier.shared
+    @ObservedObject private var prefs = Prefs.shared
 
     var body: some View {
         Form {
@@ -131,6 +160,25 @@ private struct NotificationSettings: View {
                     if !name.isEmpty { NSSound(named: name)?.play() }
                 }
                 Toggle(L("Message Preview"), isOn: $notifier.preview).disabled(!notifier.enabled)
+            }
+            Section(L("Do Not Disturb")) {
+                if prefs.paused {
+                    HStack {
+                        Text(L("Notifications are paused until %@.", Format.time(prefs.pauseUntil)))
+                        Spacer()
+                        Button(L("Resume")) { prefs.pauseUntil = .distantPast }
+                    }
+                } else {
+                    HStack {
+                        Text(L("Pause notifications"))
+                        Spacer()
+                        Button(L("1 hour")) { prefs.pauseUntil = Date().addingTimeInterval(3600) }
+                        Button(L("8 hours")) { prefs.pauseUntil = Date().addingTimeInterval(8 * 3600) }
+                        Button(L("Until tomorrow")) {
+                            prefs.pauseUntil = Calendar.current.startOfDay(for: Date().addingTimeInterval(86400)).addingTimeInterval(8 * 3600)
+                        }
+                    }
+                }
             }
             Section {
                 Button(L("Send Test Notification")) { notifier.postTest() }
