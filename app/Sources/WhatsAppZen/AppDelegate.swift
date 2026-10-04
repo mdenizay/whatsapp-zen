@@ -264,7 +264,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 showSettings()
                 RunLoop.current.run(until: Date().addingTimeInterval(1))
                 if let view = window.attachedSheet?.contentView { save(view, "settings.png") }
-                NSApp.terminate(nil)
+                // An open sheet can hold up a polite terminate; nothing here needs one.
+                exit(0)
             }
         }
     }

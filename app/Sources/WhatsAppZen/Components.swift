@@ -88,7 +88,9 @@ struct StatusTicks: View {
             TickShape(double: true).stroke(style: Self.stroke).frame(width: 15, height: 8)
                 .foregroundStyle(status == Status.read
                     ? AnyShapeStyle(onBubble ? Theme.readTickOnBubble : Theme.readTick)
-                    : AnyShapeStyle(.secondary))
+                    // Delivered but not read (or the reader hides read receipts):
+                    // on the green bubble, grey would all but disappear.
+                    : (onBubble ? AnyShapeStyle(.white.opacity(0.78)) : AnyShapeStyle(.secondary)))
         }
     }
 
