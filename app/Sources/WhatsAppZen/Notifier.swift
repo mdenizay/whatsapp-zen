@@ -13,6 +13,26 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
     @Published var sound = UserDefaults.standard.object(forKey: "notifySound") as? Bool ?? true {
         didSet { UserDefaults.standard.set(sound, forKey: "notifySound") }
     }
+    /// A system sound to play instead of the default one; empty means default.
+    @Published var soundName = UserDefaults.standard.string(forKey: "notifySoundName") ?? "" {
+        didSet { UserDefaults.standard.set(soundName, forKey: "notifySoundName") }
+    }
+
+    /// The alert sounds installed with macOS.
+    static let systemSounds: [String] = ((try? FileManager.default.contentsOfDirectory(atPath: "/System/Library/Sounds")) ?? [])
+        .filter { $0.hasSuffix(".aiff") }.map { String($0.dropLast(5)) }.sorted()
+
+    /// Sets the sound on a notification. A chosen system sound is played by
+    /// the app itself, which is running whenever it posts a notification.
+    private func applySound(to content: UNMutableNotificationContent) {
+        guard sound else { return }
+        if soundName.isEmpty {
+            content.sound = .default
+        } else {
+            NSSound(named: soundName)?.play()
+        }
+    }
+
     /// Hide message text in banners (shows L("New message") instead).
     @Published var preview = UserDefaults.standard.object(forKey: "notifyPreview") as? Bool ?? true {
         didSet { UserDefaults.standard.set(preview, forKey: "notifyPreview") }
@@ -65,7 +85,7 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
         if AppModel.shared.accounts.count > 1 { subtitle.append(account.label) }
         content.subtitle = subtitle.joined(separator: " · ")
         content.body = preview ? message.plainText : L("New message")
-        if sound { content.sound = .default }
+        applySound(to: content)
         content.categoryIdentifier = "message"
         content.threadIdentifier = "\(account.id)/\(chat)"
         content.userInfo = ["chat": chat, "account": account.id]
@@ -93,7 +113,7 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let content = UNMutableNotificationContent()
         content.title = video ? L("Incoming video call") : L("Incoming voice call")
         content.body = L("%@ is calling. Answer on your phone.", name)
-        if sound { content.sound = .default }
+        applySound(to: content)
         content.categoryIdentifier = "call"
         content.interruptionLevel = .timeSensitive
         content.userInfo = ["account": account.id, "call_from": from, "call_id": callID]
@@ -105,7 +125,7 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let content = UNMutableNotificationContent()
         content.title = "WhatsApp"
         content.body = L("Notifications are working.")
-        if sound { content.sound = .default }
+        applySound(to: content)
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "test", content: content, trigger: nil)) { _ in
             self.refresh()
         }
@@ -148,6 +168,6 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                 withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void) {
-        done(sound ? [.banner, .sound, .list] : [.banner, .list])
+        done(sound && soundName.isEmpty ? [.banner, .sound, .list] : [.banner, .list])
     }
 }

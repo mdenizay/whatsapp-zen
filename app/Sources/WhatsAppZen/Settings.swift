@@ -93,6 +93,16 @@ private struct NotificationSettings: View {
             Section {
                 Toggle(L("Show Notifications"), isOn: $notifier.enabled)
                 Toggle(L("Play Sound"), isOn: $notifier.sound).disabled(!notifier.enabled)
+                Picker(L("Notification Sound"), selection: $notifier.soundName) {
+                    Text(L("Default")).tag("")
+                    Divider()
+                    ForEach(Notifier.systemSounds, id: \.self) { Text($0).tag($0) }
+                }
+                .disabled(!notifier.enabled || !notifier.sound)
+                .onChange(of: notifier.soundName) { _, name in
+                    // Let the choice be heard.
+                    if !name.isEmpty { NSSound(named: name)?.play() }
+                }
                 Toggle(L("Message Preview"), isOn: $notifier.preview).disabled(!notifier.enabled)
             }
             Section {
