@@ -1,0 +1,153 @@
+import AppKit
+import UserNotifications
+
+/// macOS notifications for incoming messages, with reply from the banner.
+final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
+    static let shared = Notifier()
+
+    /// Whether macOS lets this app post notifications at all.
+    @Published private(set) var permitted = true
+    @Published var enabled = UserDefaults.standard.object(forKey: "notify") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(enabled, forKey: "notify") }
+    }
+    @Published var sound = UserDefaults.standard.object(forKey: "notifySound") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(sound, forKey: "notifySound") }
+    }
+    /// Hide message text in banners (shows L("New message") instead).
+    @Published var preview = UserDefaults.standard.object(forKey: "notifyPreview") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(preview, forKey: "notifyPreview") }
+    }
+
+    /// Opens a chat in the main window; set by the app delegate.
+    var openChat: (_ account: String, _ chat: String) -> Void = { _, _ in }
+
+    /// Notifications need a real bundle; skip them when run as a bare binary.
+    private let available = Bundle.main.bundleIdentifier != nil
+
+    func setUp() {
+        guard available else { return }
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        let reply = UNTextInputNotificationAction(identifier: "reply", title: L("Reply"), options: [],
+                                                  textInputButtonTitle: L("Send"), textInputPlaceholder: L("Message"))
+        let read = UNNotificationAction(identifier: "read", title: L("Mark as Read"), options: [])
+        center.setNotificationCategories([
+            UNNotificationCategory(identifier: "message", actions: [reply, read], intentIdentifiers: []),
+            UNNotificationCategory(identifier: "call", actions: [
+                UNNotificationAction(identifier: "decline", title: L("Decline"), options: [.destructive]),
+            ], intentIdentifiers: []),
+        ])
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { [weak self] _, _ in self?.refresh() }
+    }
+
+    /// Re-reads the system setting; the user can change it at any time.
+    func refresh() {
+        guard available else { return }
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            let ok = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
+            DispatchQueue.main.async { self.permitted = ok }
+        }
+    }
+
+    func openSystemSettings() {
+        let id = Bundle.main.bundleIdentifier ?? ""
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(id)") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    func post(account: AppStore, chat: String, chatName: String, message: Message) {
+        guard available, enabled else { return }
+        let content = UNMutableNotificationContent()
+        content.title = chatName
+        var subtitle: [String] = []
+        if chat.hasSuffix("@g.us") { subtitle.append(message.senderName) }
+        if AppModel.shared.accounts.count > 1 { subtitle.append(account.label) }
+        content.subtitle = subtitle.joined(separator: " · ")
+        content.body = preview ? message.plainText : L("New message")
+        if sound { content.sound = .default }
+        content.categoryIdentifier = "message"
+        content.threadIdentifier = "\(account.id)/\(chat)"
+        content.userInfo = ["chat": chat, "account": account.id]
+
+        let accountID = account.id
+        Task {
+            // The sender's photo, shown on the banner. The system moves the
+            // attached file away, so hand it a copy.
+            if let path: String = try? await Core.call("avatar", ["jid": chat], account: accountID), !path.isEmpty {
+                let copy = FileManager.default.temporaryDirectory.appendingPathComponent("wa-avatar-\(UUID().uuidString).jpg")
+                if (try? FileManager.default.copyItem(atPath: path, toPath: copy.path)) != nil,
+                   let attachment = try? UNNotificationAttachment(identifier: "avatar", url: copy) {
+                    content.attachments = [attachment]
+                }
+            }
+            try? await UNUserNotificationCenter.current().add(
+                UNNotificationRequest(identifier: "\(accountID)/\(message.id)", content: content, trigger: nil))
+        }
+    }
+
+    /// Calls cannot be answered in this app (the protocol library carries no
+    /// call audio or video); say who is calling and offer to decline.
+    func postCall(account: AppStore, name: String, video: Bool, from: String, callID: String) {
+        guard available, enabled else { return }
+        let content = UNMutableNotificationContent()
+        content.title = video ? L("Incoming video call") : L("Incoming voice call")
+        content.body = L("%@ is calling. Answer on your phone.", name)
+        if sound { content.sound = .default }
+        content.categoryIdentifier = "call"
+        content.interruptionLevel = .timeSensitive
+        content.userInfo = ["account": account.id, "call_from": from, "call_id": callID]
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "call/\(callID)", content: content, trigger: nil))
+    }
+
+    func postTest() {
+        guard available else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "WhatsApp"
+        content.body = L("Notifications are working.")
+        if sound { content.sound = .default }
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "test", content: content, trigger: nil)) { _ in
+            self.refresh()
+        }
+    }
+
+    /// Clears delivered banners for a chat once it has been read.
+    func clear(account: String, chat: String) {
+        guard available else { return }
+        let center = UNUserNotificationCenter.current()
+        center.getDeliveredNotifications { delivered in
+            let ids = delivered.filter { $0.request.content.threadIdentifier == "\(account)/\(chat)" }.map(\.request.identifier)
+            if !ids.isEmpty { center.removeDeliveredNotifications(withIdentifiers: ids) }
+        }
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                withCompletionHandler done: @escaping () -> Void) {
+        let info = response.notification.request.content.userInfo
+        let typed = (response as? UNTextInputNotificationResponse)?.userText
+        let action = response.actionIdentifier
+        if action == "decline", let account = info["account"] as? String,
+           let from = info["call_from"] as? String, let id = info["call_id"] as? String {
+            Core.fire("reject_call", ["jid": from, "id": id], account: account)
+            return done()
+        }
+        DispatchQueue.main.async {
+            guard let chat = info["chat"] as? String, let account = info["account"] as? String,
+                  let store = AppModel.shared.accounts.first(where: { $0.id == account }) else { return }
+            if let typed {
+                store.send(text: typed, to: chat)
+                store.markRead(chat)
+            } else if action == "read" {
+                store.markRead(chat)
+            } else if action == UNNotificationDefaultActionIdentifier {
+                self.openChat(account, chat)
+            }
+        }
+        done()
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void) {
+        done(sound ? [.banner, .sound, .list] : [.banner, .list])
+    }
+}

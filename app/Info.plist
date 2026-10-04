@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>WhatsApp Zen</string>
+    <key>CFBundleDisplayName</key><string>WhatsApp Zen</string>
+    <key>CFBundleIdentifier</key><string>com.mdenizay.whatsapp</string>
+    <key>CFBundleExecutable</key><string>WhatsAppZen</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>en</string><string>tr</string><string>ru</string><string>fr</string>
+        <string>de</string><string>es</string><string>pt</string><string>it</string>
+    </array>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>0.3.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>LSMinimumSystemVersion</key><string>26.0</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.social-networking</string>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSMicrophoneUsageDescription</key><string>The microphone is used to record voice messages.</string>
+    <key>NSPrincipalClass</key><string>NSApplication</string>
+</dict>
+</plist>
