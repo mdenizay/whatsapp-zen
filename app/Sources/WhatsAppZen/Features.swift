@@ -282,6 +282,8 @@ struct ContactPicker: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) private var dismiss
     let title: String
+    /// Shown as a page of a panel rather than as a sheet of its own.
+    var embedded = false
     let pick: (Contact) -> Void
 
     @State private var contacts: [Contact] = []
@@ -293,20 +295,23 @@ struct ContactPicker: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text(title).font(.headline)
-                Spacer()
-                Button(L("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction)
+            if !embedded {
+                HStack {
+                    Text(title).font(.headline)
+                    Spacer()
+                    Button(L("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction)
+                }
+                .padding(14)
             }
-            .padding(14)
-            TextField(L("Search contacts"), text: $query).textFieldStyle(.roundedBorder).padding(.horizontal, 14).padding(.bottom, 10)
+            TextField(L("Search contacts"), text: $query).textFieldStyle(.roundedBorder)
+                .padding(.horizontal, embedded ? 10 : 14).padding(.vertical, embedded ? 8 : 0).padding(.bottom, embedded ? 0 : 10)
             List(matches) { contact in
                 Button {
                     pick(contact)
-                    dismiss()
+                    if !embedded { dismiss() }
                 } label: {
                     HStack(spacing: 10) {
-                        AvatarView(jid: contact.jid, name: contact.name, size: 30)
+                        AvatarView(jid: contact.jid, name: contact.name, size: embedded ? 24 : 30)
                         Text(contact.name)
                         Spacer()
                     }
@@ -315,7 +320,7 @@ struct ContactPicker: View {
                 .buttonStyle(.plain)
             }
         }
-        .frame(width: 380, height: 460)
+        .frame(width: embedded ? 300 : 380, height: embedded ? 320 : 460)
         .task { contacts = await store.contacts() }
     }
 }

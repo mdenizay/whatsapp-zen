@@ -89,6 +89,8 @@ struct Message: Decodable, Identifiable, Equatable {
 
     static func label(type: String, text: String, fileName: String) -> String {
         if type == "deleted" { return L("🚫 This message was deleted") }
+        // A location is worded as its title plus a maps link; lists show the title.
+        if text.hasPrefix("📍") { return text.split(separator: "\n").first.map(String.init) ?? text }
         if !text.isEmpty { return text }
         switch type {
         case "image": return L("📷 Photo")

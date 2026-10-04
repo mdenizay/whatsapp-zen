@@ -62,6 +62,7 @@ enum Demo {
             message(chat, 6, ago: 3900, me: true, "Listened, all good.", edited: true),
             message(chat, 7, ago: 3800, me: true, "", deleted: true),
             message(chat, 8, ago: 300, "I'll get the tickets then"),
+            message(chat, 11, ago: 200, type: "other", "📍 Location: Galata Tower\nhttps://maps.apple.com/?ll=41.025631,28.974170"),
             message(chat, 9, ago: 120, "Does 8 pm work for you?"),
             message(chat, 10, ago: 60, me: true, "Works for me 👌", status: 2),
         ]

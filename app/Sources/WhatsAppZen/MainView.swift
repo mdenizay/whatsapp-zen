@@ -362,9 +362,6 @@ struct ChatView: View {
     /// WA_INFO (demo snapshots) starts with the info sheet open.
     @State private var showingInfo = ProcessInfo.processInfo.environment["WA_INFO"] != nil
     @State private var showingMembers = false
-    @State private var composingPoll = false
-    @State private var pickingContact = false
-    @State private var pickingSticker = false
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -463,7 +460,7 @@ struct ChatView: View {
                         .transition(.scale.combined(with: .opacity))
                     }
                     ComposerBar(text: $text, reply: $store.replyTo, editing: $store.editing, image: $store.pendingImage,
-                                file: $store.pendingFile, chatName: chat.name, members: store.members,
+                                file: $store.pendingFile, chatName: chat.name, panelChat: chat, members: store.members,
                                 moreCount: store.pendingMore.count, onAttach: attach(_:),
                                 onEditLast: {
                                     guard let last = store.messages.last(where: { $0.fromMe && $0.type == "text" && !$0.deleted }),
@@ -525,15 +522,8 @@ struct ChatView: View {
         .sheet(item: $forwarding) { ForwardSheet(message: $0) }
         .sheet(isPresented: $showingInfo) { ChatInfoSheet(chat: chat) { showingMembers = true } }
         .sheet(isPresented: $showingMembers) { GroupInfoSheet(chat: chat) }
-        .sheet(isPresented: $composingPoll) { PollComposer(chat: chat) }
         .sheet(isPresented: Binding(get: { !store.pendingPhotos.isEmpty }, set: { if !$0 { store.pendingPhotos = [] } })) {
             PhotoSendSheet(chat: chat)
-        }
-        .sheet(isPresented: $pickingContact) {
-            ContactPicker(title: L("Send Contact")) { store.sendContact($0, to: chat.jid) }
-        }
-        .popover(isPresented: $pickingSticker, arrowEdge: .bottom) {
-            StickerPicker(chat: chat) { pickingSticker = false }.environmentObject(store)
         }
         .onAppear { text = store.drafts[chat.jid] ?? "" }
         // The view itself is kept when the chat changes: replacing it made
@@ -583,10 +573,8 @@ struct ChatView: View {
         switch kind {
         case .media: pickFile(mediaOnly: true)
         case .file: pickFile(mediaOnly: false)
-        case .poll: composingPoll = true
-        case .contact: pickingContact = true
-        case .sticker: pickingSticker = true
         case .location: store.sendLocation(to: chat.jid)
+        case .poll, .contact, .sticker: break // handled inside the + panel
         }
     }
 
@@ -671,13 +659,119 @@ struct ChatWallpaper: View {
     }
 }
 
-/// The + panel: everything that can be added to a message, as a grid of
-/// coloured tiles. A nil choice stands for the emoji palette.
+/// The + panel. Everything opens here, anchored to the + button: the grid of
+/// choices first, then stickers, emoji, a poll form or the contact list as
+/// pages of the same panel, each with a way back.
+struct AttachPanel: View {
+    @EnvironmentObject var store: AppStore
+    let chat: Chat?
+    /// Adds text (an emoji) to the message being written.
+    let insert: (String) -> Void
+    let close: () -> Void
+    /// Choices that leave the panel: file pickers and location.
+    let pick: (AttachKind) -> Void
+
+    private enum Page { case menu, stickers, emoji, poll, contact }
+    @State private var page = Page.menu
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if page != .menu {
+                HStack {
+                    Button { page = .menu } label: { Label(L("Back"), systemImage: "chevron.left") }
+                        .buttonStyle(.borderless)
+                    Spacer()
+                }
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+            }
+            switch page {
+            case .menu:
+                AttachGrid { kind in
+                    switch kind {
+                    case .sticker?: page = .stickers
+                    case .poll?: page = .poll
+                    case .contact?: page = .contact
+                    case nil: page = .emoji
+                    case let other?: pick(other)
+                    }
+                }
+            case .stickers:
+                if let chat { StickerPicker(chat: chat, close: close) }
+            case .emoji:
+                EmojiGrid(insert: insert)
+            case .poll:
+                if let chat { PollComposer(chat: chat) }
+            case .contact:
+                if let chat {
+                    ContactPicker(title: L("Send Contact"), embedded: true) { contact in
+                        store.sendContact(contact, to: chat.jid)
+                        close()
+                    }
+                }
+            }
+        }
+        .animation(.snappy(duration: 0.18), value: page)
+    }
+}
+
+/// A compact emoji picker: tap to add to the message; the panel stays open.
+struct EmojiGrid: View {
+    let insert: (String) -> Void
+
+    private static let groups: [(String, String)] = [
+        ("face.smiling", "😀 😃 😄 😁 😆 😅 🤣 😂 🙂 🙃 😉 😊 😇 🥰 😍 🤩 😘 😗 😚 😋 😛 😜 🤪 😝 🤑 🤗 🤭 🤫 🤔 🤐 🤨 😐 😑 😶 😏 😒 🙄 😬 😌 😔 😪 🤤 😴 😷 🤒 🤕 🤢 🤮 🥵 🥶 🥴 😵 🤯 🤠 🥳 😎 🤓 🧐 😕 😟 🙁 😮 😯 😲 😳 🥺 😦 😧 😨 😰 😥 😢 😭 😱 😖 😣 😞 😓 😩 😫 🥱 😤 😡 😠 🤬 😈 👿 💀 💩 🤡 👻 👽 🤖"),
+        ("hand.thumbsup", "👍 👎 👌 🤌 🤏 ✌️ 🤞 🤟 🤘 🤙 👈 👉 👆 👇 ☝️ ✋ 🤚 🖐 🖖 👋 🤝 🙏 ✍️ 💪 👏 🙌 👐 🤲 🫶 🫡 🤷 🤦 🙋 🙅 🙆 💁 🧑‍💻 👀 🧠 🫂"),
+        ("heart", "❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 💔 ❣️ 💕 💞 💓 💗 💖 💘 💝 💯 💢 💥 💫 💦 💨 🔥 ⭐️ 🌟 ✨ ⚡️ 🎉 🎊 🎁 🎂 🏆 🥇 🎯"),
+        ("leaf", "🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯 🦁 🐮 🐷 🐸 🐵 🐔 🐧 🐦 🦄 🐝 🦋 🐢 🐙 🐬 🌸 🌹 🌻 🌲 🌴 🍀 🌈 ☀️ 🌙 ☁️ ❄️ 🌊"),
+        ("fork.knife", "🍏 🍎 🍊 🍋 🍌 🍉 🍇 🍓 🍒 🍑 🥑 🍅 🌽 🥕 🍞 🧀 🍳 🥓 🍔 🍟 🍕 🌭 🌮 🍣 🍜 🍝 🍦 🍩 🍪 🍫 🍿 ☕️ 🍵 🥤 🍺 🍷"),
+        ("car", "⚽️ 🏀 🏈 🎾 🏐 🎮 🎲 🎸 🎧 🎬 📷 💻 📱 ⌚️ 💡 🔑 🔒 💰 💳 ✉️ 📌 📎 ✂️ 🚗 🚕 🚌 🚲 ✈️ 🚀 🏠 🏢 🏖 ⏰ 📅 ✅ ❌ ❓ ❗️ ⚠️ 🚫"),
+    ]
+
+    @State private var group = 0
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 4) {
+                ForEach(Array(Self.groups.enumerated()), id: \.offset) { index, entry in
+                    Button { group = index } label: {
+                        Image(systemName: entry.0).font(.system(size: 13))
+                            .foregroundStyle(group == index ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary))
+                            .frame(width: 34, height: 24)
+                            .background(group == index ? AnyShapeStyle(Theme.accent.opacity(0.15)) : AnyShapeStyle(.clear),
+                                        in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+                Button { NSApp.orderFrontCharacterPalette(nil) } label: { Image(systemName: "ellipsis.circle") }
+                    .buttonStyle(.borderless)
+                    .help(L("Emoji & Symbols"))
+            }
+            ScrollView {
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(30), spacing: 2), count: 8), spacing: 2) {
+                    ForEach(Self.groups[group].1.split(separator: " ").map(String.init), id: \.self) { emoji in
+                        Button { insert(emoji) } label: {
+                            Text(emoji).font(.system(size: 20)).frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .frame(height: 170)
+        }
+        .padding(10)
+        .frame(width: 280)
+    }
+}
+
+/// The first page of the + panel: everything that can be added, as a grid of
+/// coloured tiles. A nil choice stands for emoji.
 struct AttachGrid: View {
     let pick: (AttachKind?) -> Void
 
     private static let items: [(kind: AttachKind?, title: String, icon: String, color: Color)] = [
-        (.media, "Photo or Video", "photo.fill.on.rectangle.fill", Color(light: 0x7C5CE0, dark: 0x9B7DF2)),
+        (.media, "Photo", "photo.fill.on.rectangle.fill", Color(light: 0x7C5CE0, dark: 0x9B7DF2)),
         (.file, "File", "doc.fill", Color(light: 0x2F80ED, dark: 0x5A9DF5)),
         (.sticker, "Sticker", "face.smiling.inverse", Color(light: 0xF2994A, dark: 0xF5AD6E)),
         (.poll, "Poll", "chart.bar.fill", Color(light: 0xEB5757, dark: 0xF07C7C)),
@@ -687,12 +781,12 @@ struct AttachGrid: View {
     ]
 
     var body: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.fixed(76), spacing: 6), count: 4), spacing: 12) {
+        LazyVGrid(columns: Array(repeating: GridItem(.fixed(58), spacing: 2), count: 4), spacing: 8) {
             ForEach(Self.items, id: \.title) { item in
                 AttachTile(title: L(item.title), icon: item.icon, color: item.color) { pick(item.kind) }
             }
         }
-        .padding(14)
+        .padding(10)
     }
 }
 
@@ -705,14 +799,14 @@ private struct AttachTile: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 6) {
-                Image(systemName: icon).font(.system(size: 19, weight: .medium)).foregroundStyle(.white)
-                    .frame(width: 46, height: 46)
+            VStack(spacing: 4) {
+                Image(systemName: icon).font(.system(size: 14, weight: .medium)).foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
                     .background(color.gradient, in: Circle())
                     .scaleEffect(hovering ? 1.08 : 1)
-                Text(title).font(.caption).lineLimit(1).minimumScaleFactor(0.75)
+                Text(title).font(.caption2).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
             }
-            .frame(width: 76)
+            .frame(width: 58)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -734,6 +828,8 @@ struct ComposerBar: View {
     @Binding var image: PendingImage?
     @Binding var file: PendingFile?
     let chatName: String
+    /// The chat the + panel's own pages (stickers, poll, contact) send to.
+    var panelChat: Chat?
     /// Opens a file picker; the flag limits it to photos and videos.
     /// People who can be @-mentioned (the open group's members).
     var members: [GroupMember] = []
@@ -784,14 +880,9 @@ struct ComposerBar: View {
                     .animation(.snappy(duration: 0.2), value: attaching)
                     .help(L("Attach a photo, video or file"))
                     .popover(isPresented: $attaching, arrowEdge: .top) {
-                        AttachGrid { kind in
+                        AttachPanel(chat: panelChat, insert: { text += $0 }, close: { attaching = false }) { kind in
                             attaching = false
-                            if let kind {
-                                onAttach(kind)
-                            } else {
-                                focused = true
-                                NSApp.orderFrontCharacterPalette(nil)
-                            }
+                            onAttach(kind)
                         }
                     }
                 }

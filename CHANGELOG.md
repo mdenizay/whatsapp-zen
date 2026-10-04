@@ -2,6 +2,12 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.6.2
+
+- Locations are shown as a small map with a pin; click to open in Maps
+- A more compact + panel; stickers, emoji, polls and contacts now open inside it, next to the + button
+- A built-in emoji picker
+
 ## 0.6.1
 
 - The + button opens a panel of coloured tiles instead of a plain menu

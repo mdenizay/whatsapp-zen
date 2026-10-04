@@ -298,7 +298,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         store.open(store.chats.first?.jid)
         if ProcessInfo.processInfo.environment["WA_SPLIT"] != nil { store.splitChat = store.chats.dropFirst().first?.jid }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + (Double(ProcessInfo.processInfo.environment["WA_DELAY"] ?? "") ?? 2)) { [self] in
             if let view = window.contentView?.superview { save(view, "main.png") }
             if ProcessInfo.processInfo.environment["WA_SWITCH"] != nil {
                 // Step through the chats and capture after each, to compare

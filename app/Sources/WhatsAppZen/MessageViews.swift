@@ -168,12 +168,12 @@ struct MessageRow: View {
         case "poll":
             if let poll = message.poll { PollView(message: message, poll: poll, onBubble: mine) }
         default:
-            EmptyView()
+            if let place = LocationCard.place(in: message.text) { LocationCard(place: place, onBubble: mine) }
         }
         if message.type == "text", message.linkTitle?.isEmpty == false {
             LinkCard(message: message, onBubble: mine)
         }
-        if message.type == "poll", message.poll != nil {
+        if (message.type == "poll" && message.poll != nil) || LocationCard.place(in: message.text) != nil {
             meta.frame(maxWidth: .infinity, alignment: .trailing)
         } else if !message.text.isEmpty {
             HStack(alignment: .lastTextBaseline, spacing: 8) {
