@@ -57,9 +57,14 @@ func newApp(id, dir string) (*App, error) {
 	db.Exec(`UPDATE messages SET media_path = ? || substr(media_path, instr(media_path, '/media/'))
 		WHERE media_path != '' AND instr(media_path, '/media/') > 0 AND media_path NOT LIKE ? || '%'`, dir, dir)
 	log := newFileLog(filepath.Join(dir, "core.log"))
-	container, err := sqlstore.New(bg, "sqlite3",
-		"file:"+filepath.Join(dir, "store.db")+"?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", log.Sub("store"))
+	storeDB, err := sql.Open("sqlite3",
+		"file:"+filepath.Join(dir, "store.db")+"?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000&_cache_size=-1024")
 	if err != nil {
+		return nil, err
+	}
+	leanPool(storeDB)
+	container := sqlstore.NewWithDB(storeDB, "sqlite3", log.Sub("store"))
+	if err := container.Upgrade(bg); err != nil {
 		return nil, err
 	}
 	store.DeviceProps.Os = proto.String("WhatsApp Zen")
@@ -696,8 +701,17 @@ func (a *App) onReceipt(evt *events.Receipt) {
 	} else if evt.Type != types.ReceiptTypeDelivered {
 		return
 	}
+	changed := int64(0)
 	for _, id := range evt.MessageIDs {
-		a.db.Exec(`UPDATE messages SET status=? WHERE chat=? AND id=? AND from_me=1 AND status>=0 AND status<?`, st, chat, id, st)
+		if res, err := a.db.Exec(`UPDATE messages SET status=? WHERE chat=? AND id=? AND from_me=1 AND status>=0 AND status<?`, st, chat, id, st); err == nil {
+			n, _ := res.RowsAffected()
+			changed += n
+		}
+	}
+	// Every device of every recipient sends its own receipt; most of them
+	// change nothing, and then there is nothing for the UI to redraw.
+	if changed == 0 {
+		return
 	}
 	a.emit(map[string]any{"type": "messages", "chat": chat})
 	a.emit(map[string]any{"type": "chats"})

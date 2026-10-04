@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem!
     private var panel: MenuPanel!
     private var clickMonitors: [Any] = []
+    private var chatWindows: [String: NSWindow] = [:]
     private var subscriptions = Set<AnyCancellable>()
 
     private static let panelSize = NSSize(width: 380, height: 560)
@@ -123,6 +124,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.collectionBehavior = [.transient, .ignoresCycle, .fullScreenAuxiliary]
         panel.onCancel = { [weak self] in self?.closePanel() }
 
+    }
+
+    /// The panel's views exist only while it is open: a hidden chat list
+    /// would otherwise keep redrawing itself with every incoming message.
+    private func makePanelContent() -> NSView {
         let content = RootView {
             MenuBarView { [weak self] chat in
                 if let chat { self?.model.active?.open(chat) }
@@ -137,13 +143,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             backing.wantsLayer = true
             backing.layer?.cornerRadius = 24
             backing.layer?.masksToBounds = true
-            panel.contentView = backing
-            return
+            return backing
         }
         let glass = NSGlassEffectView(frame: NSRect(origin: .zero, size: Self.panelSize))
         glass.cornerRadius = 24
         glass.contentView = NSHostingView(rootView: content)
-        panel.contentView = glass
+        return glass
     }
 
     /// The WhatsApp glyph as a template image, so it follows the menu bar's
@@ -200,6 +205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         x = min(max(x, screen.minX + 8), screen.maxX - Self.panelSize.width - 8)
         // Hang just below the menu bar, like the system's own menu bar extras.
         let y = min(anchor.minY, screen.maxY) - Self.panelSize.height - 6
+        panel.contentView = makePanelContent()
         panel.setFrame(NSRect(origin: NSPoint(x: x, y: y), size: Self.panelSize), display: true)
         panel.makeKeyAndOrderFront(nil)
         button.highlight(true)
@@ -233,6 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard panel.isVisible else { return }
         panel.orderOut(nil)
         statusItem.button?.highlight(false)
+        panel.contentView = nil
     }
 
     // MARK: Snapshots
@@ -263,6 +270,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         store.open(store.chats.first?.jid)
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [self] in
             if let view = window.contentView?.superview { save(view, "main.png") }
+            if let photo = ProcessInfo.processInfo.environment["WA_PHOTO"] {
+                // Stage a picture and capture the send screen, then the viewer.
+                store.attach([URL(fileURLWithPath: photo)])
+                RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+                if let view = window.attachedSheet?.contentView { save(view, "photo.png") }
+                exit(0)
+            }
             if ProcessInfo.processInfo.environment["WA_INFO"] != nil {
                 if let view = window.attachedSheet?.contentView { save(view, "info.png") }
                 exit(0)
@@ -290,14 +304,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                   event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
                   event.charactersIgnoringModifiers == "v",
                   self.window.isKeyWindow, store.selected != nil, store.editing == nil else { return event }
-            if let image = Images.fromPasteboard().first {
-                store.pendingFile = nil
-                store.pendingImage = image
+            let images = Images.fromPasteboard()
+            if !images.isEmpty {
+                store.pendingPhotos = images
                 return nil
             }
             // A file copied in Finder; plain text still pastes normally.
-            if let url = Attachments.fileURLs().first {
-                store.attach(url)
+            let files = Attachments.fileURLs()
+            if !files.isEmpty {
+                store.attach(files)
                 return nil
             }
             return event
@@ -358,6 +373,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc func showMainWindow() { showWindow() }
+
+    /// Opens a chat in a window of its own, next to the main one.
+    func openChatWindow(_ chat: Chat, in store: AppStore) {
+        let key = "\(store.id)/\(chat.jid)"
+        if let existing = chatWindows[key] {
+            existing.makeKeyAndOrderFront(nil)
+            return
+        }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 620),
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                              backing: .buffered, defer: false)
+        window.title = chat.name
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isReleasedWhenClosed = false
+        window.minSize = NSSize(width: 340, height: 380)
+        let view = MenuChatView(chat: chat, openApp: { [weak self] jid in
+            if let jid { store.openChecked(jid) }
+            self?.showWindow()
+        }, back: {}, mode: .window)
+            .environmentObject(store)
+            .environmentObject(model)
+            .tint(Theme.accent)
+        let hosting = NSHostingView(rootView: view)
+        hosting.sizingOptions = []
+        window.contentView = hosting
+        window.center()
+        window.setFrameAutosaveName("chat-\(key)")
+        chatWindows[key] = window
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+            // Let go of the window's views when it closes.
+            self?.chatWindows[key]?.contentView = nil
+            self?.chatWindows[key] = nil
+        }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
 
     @objc func showSwitcher() {
         showWindow()

@@ -10,8 +10,10 @@ struct MessageActions {
     var edit: ((Message) -> Void)?
     var forward: ((Message) -> Void)?
     var jump: (String) -> Void = { _ in }
-    /// Shows a downloaded file (photo, video, document).
+    /// Shows a downloaded document.
     var preview: (String) -> Void = { NSWorkspace.shared.open(URL(fileURLWithPath: $0)) }
+    /// Opens a photo or video in the in-app viewer.
+    var view: ((Message) -> Void)?
 }
 
 struct MessageRow: View {
@@ -109,7 +111,9 @@ struct MessageRow: View {
     @ViewBuilder private var content: some View {
         switch message.type {
         case "image", "sticker":
-            MediaImageView(message: message, preview: actions.preview)
+            MediaImageView(message: message, preview: { path in
+                if let view = actions.view, message.type == "image" { view(message) } else { actions.preview(path) }
+            })
                 .overlay(alignment: .bottomTrailing) {
                     if bare {
                         meta.foregroundStyle(.white)
@@ -121,7 +125,9 @@ struct MessageRow: View {
         case "audio":
             VoiceView(message: message, onBubble: mine)
         case "video", "document":
-            FileAttachmentView(message: message, onBubble: mine, preview: actions.preview)
+            FileAttachmentView(message: message, onBubble: mine, preview: { path in
+                if let view = actions.view, message.type == "video" { view(message) } else { actions.preview(path) }
+            })
         case "poll":
             if let poll = message.poll { PollView(message: message, poll: poll, onBubble: mine) }
         default:
@@ -375,7 +381,7 @@ struct SendingBadge: View {
 }
 
 /// Fetches a message's media file on demand.
-private func mediaPath(for message: Message) async -> String? {
+func mediaPath(for message: Message) async -> String? {
     if let path = message.mediaPath, !path.isEmpty, FileManager.default.fileExists(atPath: path) { return path }
     return try? await Core.call("download", ["chat": message.chat, "id": message.id])
 }

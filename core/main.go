@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 )
 
@@ -150,6 +151,14 @@ func call(r *Req) (any, error) {
 func WAStart(dataDir *C.char, cb C.wa_event_cb) {
 	// Trade a little CPU for a smaller heap; this process is mostly idle.
 	debug.SetGCPercent(40)
+	debug.SetMemoryLimit(64 << 20)
+	// The Go runtime holds on to freed memory for a while; hand it back so an
+	// idle app stays small.
+	go func() {
+		for range time.Tick(3 * time.Minute) {
+			debug.FreeOSMemory()
+		}
+	}()
 	baseDir = C.GoString(dataDir)
 	eventCB = cb
 	migrate()

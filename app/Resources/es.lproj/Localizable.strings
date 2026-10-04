@@ -278,3 +278,11 @@
 "Show in Chat" = "Mostrar en el chat";
 "Export" = "Exportar";
 "Members" = "Miembros";
+"Draw" = "Dibujar";
+"Arrow" = "Flecha";
+"Rectangle" = "Rectángulo";
+"Apply" = "Aplicar";
+"Send %lld" = "Enviar %lld";
+"Save…" = "Guardar…";
+"Open in New Window" = "Abrir en una ventana nueva";
+"Open Beside Current Chat" = "Abrir junto al chat actual";

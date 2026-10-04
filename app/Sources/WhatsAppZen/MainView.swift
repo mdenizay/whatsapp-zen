@@ -20,7 +20,21 @@ struct MainView: View {
                     Sidebar(newChat: $model.showingNewChat).navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 420)
                 } detail: {
                     if let chat = store.selectedChat {
-                        ChatView(chat: chat).id(chat.jid)
+                        if let other = store.chats.first(where: { $0.jid == store.splitChat }), other.jid != chat.jid {
+                            // Two conversations side by side.
+                            HSplitView {
+                                ChatView(chat: chat).id(chat.jid).frame(minWidth: 320)
+                                MenuChatView(chat: other, openApp: { jid in
+                                    store.splitChat = nil
+                                    if let jid { store.openChecked(jid) }
+                                }, back: { store.splitChat = nil }, mode: .split)
+                                    .id(other.jid)
+                                    .frame(minWidth: 300, idealWidth: 380)
+                                    .background(.background)
+                            }
+                        } else {
+                            ChatView(chat: chat).id(chat.jid)
+                        }
                     } else {
                         ContentUnavailableView(L("Select a chat"), systemImage: "bubble.left.and.bubble.right",
                                                description: Text(L("Pick a chat on the left, or start a new one.")))
@@ -31,6 +45,10 @@ struct MainView: View {
                 .sheet(isPresented: $model.showingStatus) { StatusSheet() }
             }
         }
+        .overlay {
+            if let viewer = store.viewer { MediaViewer(state: viewer) }
+        }
+        .animation(.easeOut(duration: 0.15), value: store.viewer != nil)
         .tint(Theme.accent)
         .sheet(isPresented: $model.showingSettings) { SettingsView().environmentObject(model) }
         .sheet(isPresented: Binding(get: { model.releaseNotes != nil }, set: { if !$0 { model.releaseNotes = nil } })) {
@@ -103,6 +121,16 @@ struct Sidebar: View {
                                 Button(L("1 week")) { store.mute(chat, seconds: 7 * 86400) }
                                 Button(L("Always")) { store.mute(chat, seconds: -1) }
                             }
+                        }
+                        if store.selected != nil, store.selected != chat.jid {
+                            Button(L("Open Beside Current Chat"), systemImage: "rectangle.split.2x1") {
+                                guard !store.isSealed(chat.jid) else { return }
+                                store.splitChat = chat.jid
+                            }
+                        }
+                        Button(L("Open in New Window"), systemImage: "macwindow.on.rectangle") {
+                            guard !store.isSealed(chat.jid) else { return store.openChecked(chat.jid) }
+                            (NSApp.delegate as? AppDelegate)?.openChatWindow(chat, in: store)
                         }
                         Button(store.isLocked(chat.jid) ? L("Remove Lock") : L("Lock"), systemImage: "lock") {
                             store.setLocked(chat.jid, !store.isLocked(chat.jid))
@@ -280,7 +308,8 @@ struct ChatView: View {
                         edit: { store.clearDraftState(); store.editing = $0; text = $0.text },
                         forward: { forwarding = $0 },
                         jump: { jump(to: $0, proxy: proxy) },
-                        preview: { store.previewURL = URL(fileURLWithPath: $0) }
+                        preview: { store.previewURL = URL(fileURLWithPath: $0) },
+                        view: { store.view($0) }
                     ))
                 }
                 .padding(.horizontal, 16)
@@ -290,7 +319,8 @@ struct ChatView: View {
                 .transaction { $0.animation = nil }
             }
             .defaultScrollAnchor(.bottom)
-            .scrollEdgeEffectStyle(.soft, for: .all)
+            .scrollEdgeEffectStyle(.hard, for: .top)
+            .scrollEdgeEffectStyle(.soft, for: .bottom)
             .onScrollGeometryChange(for: Bool.self) { geo in
                 geo.contentSize.height - geo.contentOffset.y - geo.containerSize.height > 260
             } action: { _, far in
@@ -380,9 +410,9 @@ struct ChatView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .padding(.trailing, 6)
                 .help(L("Chat info, media and settings"))
             }
-            .sharedBackgroundVisibility(.hidden)
             // With the title gone, keep the actions at the trailing edge.
             ToolbarSpacer(.flexible)
             ToolbarItemGroup(placement: .primaryAction) {
@@ -406,6 +436,9 @@ struct ChatView: View {
         .sheet(isPresented: $showingInfo) { ChatInfoSheet(chat: chat) { showingMembers = true } }
         .sheet(isPresented: $showingMembers) { GroupInfoSheet(chat: chat) }
         .sheet(isPresented: $composingPoll) { PollComposer(chat: chat) }
+        .sheet(isPresented: Binding(get: { !store.pendingPhotos.isEmpty }, set: { if !$0 { store.pendingPhotos = [] } })) {
+            PhotoSendSheet(chat: chat)
+        }
         .sheet(isPresented: $pickingContact) {
             ContactPicker(title: L("Send Contact")) { store.sendContact($0, to: chat.jid) }
         }
@@ -485,10 +518,8 @@ struct ChatView: View {
             if !urls.isEmpty {
                 store.attach(urls)
             } else {
-                Images.fromDrop([provider]) { images in
-                    guard let image = images.first else { return }
-                    store.pendingFile = nil
-                    store.pendingImage = image
+                Images.fromDrop(providers) { images in
+                    if !images.isEmpty { store.pendingPhotos = images }
                 }
             }
         }
@@ -541,7 +572,6 @@ struct ComposerBar: View {
     let onSend: () -> Void
 
     @FocusState private var focused: Bool
-    @State private var cropping = false
     @StateObject private var recorder = VoiceRecorder()
 
     /// With nothing typed or attached, the send button records instead.
@@ -727,11 +757,6 @@ struct ComposerBar: View {
                 Image(nsImage: image.preview).resizable().scaledToFit()
                     .frame(maxHeight: 130)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                Button(L("Crop"), systemImage: "crop") { cropping = true }
-                    .buttonStyle(.glass)
-                    .sheet(isPresented: $cropping) {
-                        CropSheet(image: image) { self.image = $0 }
-                    }
                 Spacer()
             } onClose: {
                 self.image = nil

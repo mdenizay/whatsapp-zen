@@ -267,7 +267,11 @@ struct StatusSheet: View {
                                 }
                                 ForEach(person.items) { item in
                                     MessageRow(message: item, showSender: false, endsGroup: true, highlighted: false, maxWidth: 360,
-                                               actions: MessageActions(reply: { _ in }, preview: { store.previewURL = URL(fileURLWithPath: $0) }))
+                                               actions: MessageActions(reply: { _ in }, preview: { store.previewURL = URL(fileURLWithPath: $0) },
+                                                       view: { item in
+                                                           dismiss()
+                                                           store.view(item, among: statuses)
+                                                       }))
                                 }
                             }
                         }
@@ -428,7 +432,11 @@ struct ChatInfoSheet: View {
             ScrollView {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 4), spacing: 3) {
                     ForEach(items) { item in
-                        MediaTile(message: item) { open(item) }
+                        MediaTile(message: item) {
+                            // Photos and videos open in the viewer, over the chat.
+                            dismiss()
+                            store.view(item, among: items.reversed())
+                        }
                             .contextMenu { Button(L("Show in Chat"), systemImage: "bubble.left") { reveal(item) } }
                     }
                 }
@@ -594,6 +602,50 @@ private struct MediaTile: View {
     }
 }
 
+/// One downloaded file in the storage gallery.
+private struct CachedTile: View {
+    let message: Message
+    @State private var image: NSImage?
+
+    private var icon: String {
+        switch message.type {
+        case "video": return "play.fill"
+        case "audio": return "waveform"
+        case "document": return "doc.fill"
+        default: return "photo"
+        }
+    }
+
+    var body: some View {
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                if let image {
+                    Image(nsImage: image).resizable().scaledToFill()
+                } else {
+                    Rectangle().fill(.quaternary)
+                    Image(systemName: icon).foregroundStyle(.secondary)
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if message.type == "video", image != nil {
+                    Image(systemName: "play.fill").font(.caption).foregroundStyle(.white).shadow(radius: 2).padding(4)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .contentShape(Rectangle())
+            .task {
+                // The embedded thumbnail is enough at this size; fall back to
+                // the file for stickers, which have none.
+                if let thumb = Images.thumbnail(base64: message.thumb) {
+                    image = thumb
+                } else if message.isVisual, let path = message.mediaPath {
+                    image = await Images.load(path: path, maxPixel: 120)
+                }
+            }
+    }
+}
+
 // MARK: App lock
 
 /// Covers the app until Touch ID (or the password) unlocks it.
@@ -748,6 +800,7 @@ struct StorageSettings: View {
     @ObservedObject private var prefs = Prefs.shared
     @State private var bytes = 0
     @State private var busy = false
+    @State private var items: [Message] = []
 
     var body: some View {
         Form {
@@ -766,6 +819,7 @@ struct StorageSettings: View {
                         Task { @MainActor in
                             for account in model.accounts { await account.clearCache() }
                             await measure()
+                            items = []
                             busy = false
                         }
                     }
@@ -774,9 +828,44 @@ struct StorageSettings: View {
             } footer: {
                 Text(L("Media still on WhatsApp's servers is downloaded again when you look at it."))
             }
+            if !items.isEmpty {
+                Section(L("Downloaded media")) {
+                    // Lazy: tiles are built, and their pictures decoded, only
+                    // as they scroll into view.
+                    ScrollView {
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 5), spacing: 4) {
+                            ForEach(items) { item in
+                                CachedTile(message: item)
+                                    .onTapGesture {
+                                        guard item.type == "image" || item.type == "video" else { return }
+                                        model.showingSettings = false
+                                        model.active?.viewer = ViewerState(items: items.filter { $0.type == "image" || $0.type == "video" },
+                                                                           index: items.filter { $0.type == "image" || $0.type == "video" }.firstIndex { $0.id == item.id } ?? 0)
+                                    }
+                                    .contextMenu {
+                                        Button(L("Show in Finder"), systemImage: "folder") {
+                                            if let path = item.mediaPath { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
+                                        }
+                                        Button(L("Remove"), systemImage: "trash", role: .destructive) {
+                                            Task { @MainActor in
+                                                await model.active?.removeCached(item)
+                                                items.removeAll { $0.id == item.id }
+                                                await measure()
+                                            }
+                                        }
+                                    }
+                            }
+                        }
+                    }
+                    .frame(height: 190)
+                }
+            }
         }
         .formStyle(.grouped)
-        .task { await measure() }
+        .task {
+            await measure()
+            items = await model.active?.cachedMedia() ?? []
+        }
     }
 
     @MainActor private func measure() async {

@@ -71,6 +71,12 @@ final class AppStore: ObservableObject, Identifiable {
     @Published var pinnedMessages: [Message] = []
     /// A message the conversation view should scroll to and flash.
     @Published var jumpTarget: String?
+    /// Photos waiting in the send screen (crop, draw, caption).
+    @Published var pendingPhotos: [PendingImage] = []
+    /// The in-app photo and video viewer, when open.
+    @Published var viewer: ViewerState?
+    /// A second chat shown beside the open one in the main window.
+    @Published var splitChat: String?
     /// Unsent text per chat.
     @Published var drafts: [String: String] = [:]
     /// Further files queued behind the staged attachment, sent with it.
@@ -85,6 +91,7 @@ final class AppStore: ObservableObject, Identifiable {
     let messagesChanged = PassthroughSubject<String, Never>()
 
     private var chatsReload: DispatchWorkItem?
+    private var messagesReload: DispatchWorkItem?
     private var typingExpiry: [String: DispatchWorkItem] = [:]
     private var lastTypingSent = Date.distantPast
 
@@ -159,7 +166,7 @@ final class AppStore: ObservableObject, Identifiable {
             scheduleChatsReload()
         case "messages":
             let chat = obj["chat"] as? String ?? ""
-            if chat.isEmpty || chat == selected { reloadMessages() }
+            if chat.isEmpty || chat == selected { scheduleMessagesReload() }
             messagesChanged.send(chat)
         case "message":
             guard let ev = try? Core.decoder.decode(MessageEvent.self, from: data) else { return }
@@ -210,7 +217,7 @@ final class AppStore: ObservableObject, Identifiable {
         chatsReload?.cancel()
         let item = DispatchWorkItem { [weak self] in self?.reloadChats() }
         chatsReload = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: item)
     }
 
     func reloadChats() {
@@ -230,6 +237,14 @@ final class AppStore: ObservableObject, Identifiable {
             args["before_id"] = before.id
         }
         return try? await Core.call("messages", args, account: self.id)
+    }
+
+    /// Receipts and reactions arrive in bursts; redraw the conversation once.
+    func scheduleMessagesReload() {
+        messagesReload?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.reloadMessages() }
+        messagesReload = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: item)
     }
 
     func reloadMessages() {
@@ -277,6 +292,7 @@ final class AppStore: ObservableObject, Identifiable {
         pendingImage = nil
         pendingFile = nil
         pendingMore = []
+        pendingPhotos = []
     }
 
     func watchPresence(of jid: String) {
@@ -334,8 +350,13 @@ final class AppStore: ObservableObject, Identifiable {
     /// Stages several files: the first is shown in the composer, the rest
     /// are queued behind it and go out with the same press of Send.
     func attach(_ urls: [URL]) {
-        guard let first = urls.first else { return }
-        pendingMore = Array(urls.dropFirst())
+        // Photos go to the send screen together; other files are staged in
+        // the composer, the first shown and the rest queued behind it.
+        let photos = urls.filter(Attachments.isImage).compactMap { try? Data(contentsOf: $0) }.compactMap(Images.prepare)
+        if !photos.isEmpty { pendingPhotos = photos }
+        let files = urls.filter { !Attachments.isImage($0) }
+        guard let first = files.first else { return }
+        pendingMore = Array(files.dropFirst())
         attach(first)
     }
 
@@ -351,8 +372,7 @@ final class AppStore: ObservableObject, Identifiable {
     func attach(_ url: URL) {
         Task { @MainActor in
             if Attachments.isImage(url), let data = try? Data(contentsOf: url), let image = Images.prepare(data) {
-                self.pendingFile = nil
-                self.pendingImage = image
+                self.pendingPhotos = [image]
             } else if let file = await Attachments.file(at: url) {
                 self.pendingImage = nil
                 self.pendingFile = file

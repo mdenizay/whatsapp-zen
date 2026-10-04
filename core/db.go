@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"strings"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -62,11 +63,20 @@ type execer interface {
 	Exec(query string, args ...any) (sql.Result, error)
 }
 
+// leanPool keeps a database from holding more connections (each with its own
+// page cache) than a mostly idle app needs.
+func leanPool(db *sql.DB) {
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxIdleTime(30 * time.Second)
+}
+
 func openDB(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", "file:"+path+"?_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL&_txlock=immediate")
+	db, err := sql.Open("sqlite3", "file:"+path+"?_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL&_txlock=immediate&_cache_size=-1024")
 	if err != nil {
 		return nil, err
 	}
+	leanPool(db)
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err
 	}

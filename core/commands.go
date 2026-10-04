@@ -122,6 +122,17 @@ func (a *App) dispatch(r *Req) (any, error) {
 		return nil, a.export(r.Chat, r.Path)
 	case "cache_size":
 		return dirSize(filepath.Join(a.dir, "media")), nil
+	case "cache_list":
+		return a.queryMessages(`media_path != '' AND deleted=0 AND type IN ('image','video','sticker','document','audio')
+			ORDER BY ts DESC LIMIT 400`)
+	case "cache_remove":
+		var path string
+		a.db.QueryRow(`SELECT media_path FROM messages WHERE chat=? AND id=?`, r.Chat, r.ID).Scan(&path)
+		if path != "" && strings.HasPrefix(path, filepath.Join(a.dir, "media")) {
+			os.Remove(path)
+		}
+		_, err := a.db.Exec(`UPDATE messages SET media_path='' WHERE chat=? AND id=?`, r.Chat, r.ID)
+		return nil, err
 	case "clear_cache":
 		return nil, a.clearCache()
 	case "send_voice":

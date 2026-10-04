@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 enum Images {
     private static let cache: NSCache<NSString, NSImage> = {
         let c = NSCache<NSString, NSImage>()
-        c.totalCostLimit = 40 << 20
+        c.totalCostLimit = 24 << 20
         return c
     }()
 

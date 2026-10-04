@@ -2,6 +2,15 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.5.0
+
+- Photos go through a send screen first: crop, rotate, draw, add arrows and boxes, write a caption; several photos at once
+- Photos and videos open in a viewer inside the app: zoom, step through the chat's media, copy, save
+- Split view: right-click a chat → Open Beside Current Chat to see two conversations in the main window
+- Open any chat in a window of its own (right-click a chat → Open in New Window) to keep several conversations side by side
+- Settings → Storage shows the downloaded media; open or remove items one by one
+- Lighter on the system: less work when receipts arrive in bursts, less memory held while idle
+
 ## 0.4.2
 
 - A redesigned chat info panel: bigger header, one-tap actions, and shared photos, documents and links that open on click

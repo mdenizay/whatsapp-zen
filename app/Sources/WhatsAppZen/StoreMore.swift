@@ -170,6 +170,14 @@ extension AppStore {
 
     // MARK: Storage
 
+    func cachedMedia() async -> [Message] {
+        (try? await Core.call("cache_list", account: id)) ?? []
+    }
+
+    func removeCached(_ message: Message) async {
+        try? await Core.run("cache_remove", ["chat": message.chat, "id": message.id], account: id)
+    }
+
     func cacheSize() async -> Int {
         (try? await Core.call("cache_size", account: id)) ?? 0
     }

@@ -132,6 +132,10 @@ struct MenuChatView: View {
     let chat: Chat
     let openApp: (String?) -> Void
     let back: () -> Void
+    /// Where this conversation is shown.
+    enum Mode { case panel, window, split }
+    var mode = Mode.panel
+    private var detached: Bool { mode != .panel }
 
     @State private var messages: [Message] = []
     @State private var text = ""
@@ -144,9 +148,14 @@ struct MenuChatView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 2) {
-                        MessageList(messages: messages, isGroup: chat.isGroup, maxWidth: 250, actions: MessageActions(
+                        MessageList(messages: messages, isGroup: chat.isGroup, maxWidth: detached ? 360 : 250, actions: MessageActions(
                             reply: { editing = nil; reply = $0 },
-                            edit: { reply = nil; editing = $0; text = $0.text }
+                            edit: { reply = nil; editing = $0; text = $0.text },
+                            // Media opens in the main window's viewer.
+                            view: { item in
+                                openApp(chat.jid)
+                                store.view(item, among: messages)
+                            }
                         ))
                     }
                     .padding(.horizontal, 10)
@@ -179,8 +188,15 @@ struct MenuChatView: View {
 
     private var header: some View {
         HStack(spacing: 9) {
-            GlassIconButton(icon: "chevron.left", help: L("Back to chats"), action: back)
-                .keyboardShortcut(.cancelAction)
+            if mode == .window {
+                // Room for the window's close and minimise buttons.
+                Color.clear.frame(width: 58, height: 1)
+            } else if mode == .split {
+                GlassIconButton(icon: "xmark", help: L("Close"), action: back)
+            } else {
+                GlassIconButton(icon: "chevron.left", help: L("Back to chats"), action: back)
+                    .keyboardShortcut(.cancelAction)
+            }
             AvatarView(jid: chat.jid, name: chat.name, size: 32, tick: store.avatarTick)
             VStack(alignment: .leading, spacing: 0) {
                 Text(chat.name).fontWeight(.semibold).lineLimit(1)
