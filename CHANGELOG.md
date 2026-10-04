@@ -2,6 +2,10 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.7.5
+
+- Pinned and muted chats no longer lose their state after a while (a later history sync was clearing it)
+
 ## 0.7.4
 
 - A softer chat info panel: smaller header, round action buttons, a lighter tab bar

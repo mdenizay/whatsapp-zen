@@ -329,7 +329,7 @@ func (a *App) getChats() ([]*ChatJSON, error) {
 			COALESCE(m.sender,''), COALESCE(m.deleted,0), COALESCE(m.file_name,'')
 		FROM chats c LEFT JOIN messages m ON m.chat=c.jid
 			AND m.id=(SELECT id FROM messages WHERE chat=c.jid ORDER BY ts DESC, id DESC LIMIT 1)
-		WHERE c.last_ts>0 ORDER BY c.last_ts DESC LIMIT 600`)
+		WHERE c.last_ts>0 ORDER BY c.pinned DESC, c.last_ts DESC LIMIT 600`)
 	if err != nil {
 		return nil, err
 	}

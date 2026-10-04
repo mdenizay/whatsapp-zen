@@ -14,6 +14,7 @@ import (
 	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/proto/waCompanionReg"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
@@ -351,7 +352,7 @@ func (a *App) setGroupName(x execer, jid, name string) {
 // chats, starred messages) once, for databases paired before those were
 // stored. The replay arrives as ordinary Archive/Pin/Star events.
 func (a *App) resyncSettings(cli *whatsmeow.Client) {
-	marker := filepath.Join(a.dir, ".settings-synced-2")
+	marker := filepath.Join(a.dir, ".settings-synced-3")
 	if _, err := os.Stat(marker); err == nil {
 		return
 	}
@@ -762,8 +763,15 @@ func (a *App) onHistory(evt *events.HistorySync) {
 		if chat.Server == types.GroupServer {
 			a.setGroupName(tx, cs, conv.GetName())
 		}
-		tx.Exec(`UPDATE chats SET archived=?, pinned=?, ephemeral=?, muted_until=? WHERE jid=?`,
-			conv.GetArchived(), conv.GetPinned() > 0, conv.GetEphemeralExpiration(), muteUntil(int64(conv.GetMuteEndTime())), cs)
+		// Only the first sync after pairing describes a chat's settings. Later
+		// ones (recent messages, on-demand history) leave those fields empty,
+		// and taking them at their word unpinned and unmuted every chat.
+		if evt.Data.GetSyncType() == waHistorySync.HistorySync_INITIAL_BOOTSTRAP {
+			tx.Exec(`UPDATE chats SET archived=?, pinned=?, ephemeral=?, muted_until=? WHERE jid=?`,
+				conv.GetArchived(), conv.GetPinned() > 0, conv.GetEphemeralExpiration(), muteUntil(int64(conv.GetMuteEndTime())), cs)
+		} else if secs := conv.GetEphemeralExpiration(); secs > 0 {
+			tx.Exec(`UPDATE chats SET ephemeral=? WHERE jid=?`, secs, cs)
+		}
 
 		for _, hm := range conv.GetMessages() {
 			wm := hm.GetMessage()
