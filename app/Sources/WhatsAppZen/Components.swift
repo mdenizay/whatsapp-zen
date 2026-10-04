@@ -13,6 +13,13 @@ extension Color {
     }
 }
 
+extension Color {
+    /// A fixed colour from 0xRRGGBB.
+    init(hex: Int) {
+        self.init(light: UInt32(hex), dark: UInt32(hex))
+    }
+}
+
 enum Theme {
     static var accent: Color {
         let entry = Prefs.shared.accentEntry

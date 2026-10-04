@@ -29,6 +29,10 @@ final class Prefs: ObservableObject {
             wallpaperImage = nil
         }
     }
+    /// Second colour of the "theme" background as 0xRRGGBB; -1 for a single colour.
+    @Published var themeColor2: Int = value("themeColor2", -1) { didSet { saveLook("themeColor2", themeColor2) } }
+    /// How strongly the theme colours wash the window (0.05 … 0.6).
+    @Published var themeIntensity: Double = value("themeIntensity", 0.22) { didSet { saveLook("themeIntensity", themeIntensity) } }
     /// How strongly a picture wallpaper is faded toward the window colour.
     @Published var wallpaperDim: Double = value("wallpaperDim", 0.55) { didSet { saveLook("wallpaperDim", wallpaperDim) } }
     /// "default", "rounded", "serif" or "monospaced".
@@ -93,6 +97,12 @@ final class Prefs: ObservableObject {
         didSet { save("pauseUntil", pauseUntil.timeIntervalSince1970) }
     }
 
+    /// Whether the first-run setup has been completed (or skipped).
+    var onboarded: Bool {
+        get { Self.value("onboarded", false) }
+        set { save("onboarded", newValue) }
+    }
+
     /// The version whose release notes were last shown.
     var notesShownFor: String {
         get { Self.value("notesShownFor", "") }
@@ -136,6 +146,8 @@ final class Prefs: ObservableObject {
         wallpaperPath = look("wallpaperPath", "")
         wallpaperDim = look("wallpaperDim", 0.55)
         fontDesign = look("fontDesign", "default")
+        themeColor2 = look("themeColor2", -1)
+        themeIntensity = look("themeIntensity", 0.22)
     }
 
     /// Called when the active account changes: brings in that account's look.
@@ -157,7 +169,8 @@ final class Prefs: ObservableObject {
             // Start the account's look as a copy of what is on screen.
             for (key, value) in [("fontSize", fontSize), ("accent", accent), ("appearance", appearance), ("customAccent", customAccent),
                                  ("bubbleRadius", bubbleRadius), ("wallpaper", wallpaper), ("wallpaperPath", wallpaperPath),
-                                 ("wallpaperDim", wallpaperDim), ("fontDesign", fontDesign)] as [(String, Any)] {
+                                 ("wallpaperDim", wallpaperDim), ("fontDesign", fontDesign), ("themeColor2", themeColor2),
+                                 ("themeIntensity", themeIntensity)] as [(String, Any)] {
                 UserDefaults.standard.set(value, forKey: scope + key)
             }
         } else {

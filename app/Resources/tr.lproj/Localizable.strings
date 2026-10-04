@@ -331,3 +331,16 @@
 "A separate look for %@" = "%@ için ayrı görünüm";
 "Theme, colours, background and message style below apply to this account only." = "Aşağıdaki tema, renkler, arka plan ve mesaj stili yalnızca bu hesap için geçerli.";
 "All accounts share one look. Turn this on to style this account differently." = "Tüm hesaplar aynı görünümü kullanıyor. Bu hesabı farklı tasarlamak için aç.";
+"How strongly the colours tint the window" = "Renklerin pencereyi ne kadar boyadığı";
+"Pick your colours" = "Renklerini seç";
+"Drag the dot, or add a second one for a gradient." = "Noktayı sürükle ya da geçiş için ikinci bir nokta ekle.";
+"How conversations should look." = "Sohbetler nasıl görünsün.";
+"How you want to hear about new messages." = "Yeni mesajlardan nasıl haberdar olmak istersin.";
+"Keep your chats to yourself." = "Sohbetlerin sende kalsın.";
+"Skip" = "Atla";
+"Continue" = "Devam";
+"Welcome to WhatsApp Zen" = "WhatsApp Zen'e hoş geldin";
+"A light, native WhatsApp for your Mac. Let's set it up the way you like it; everything here can be changed later in Settings." = "Mac'in için hafif, native bir WhatsApp. Haydi onu sevdiğin gibi ayarlayalım; buradaki her şeyi sonra Ayarlar'dan değiştirebilirsin.";
+"How does this look?" = "Bu nasıl görünüyor?";
+"Just right 👌" = "Tam kararında 👌";
+"Run Setup Again…" = "Kurulumu Yeniden Çalıştır…";

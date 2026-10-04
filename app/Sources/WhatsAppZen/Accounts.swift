@@ -13,6 +13,7 @@ final class AppModel: ObservableObject {
     /// Settings are shown as a sheet on the main window.
     @Published var showingSettings = false
     @Published var showingNewChat = false
+    @Published var showingSetup = false
     /// Bound straight to the split view. (A binding rebuilt on every redraw
     /// made the split view re-apply its ideal width, so the list kept
     /// changing size by itself.)

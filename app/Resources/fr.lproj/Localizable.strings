@@ -331,3 +331,16 @@
 "A separate look for %@" = "Une apparence distincte pour %@";
 "Theme, colours, background and message style below apply to this account only." = "Le thème, les couleurs, le fond et le style des messages ci-dessous ne s’appliquent qu’à ce compte.";
 "All accounts share one look. Turn this on to style this account differently." = "Tous les comptes partagent la même apparence. Activez pour personnaliser ce compte.";
+"How strongly the colours tint the window" = "Intensité de la teinte dans la fenêtre";
+"Pick your colours" = "Choisissez vos couleurs";
+"Drag the dot, or add a second one for a gradient." = "Faites glisser le point, ou ajoutez-en un second pour un dégradé.";
+"How conversations should look." = "L’apparence de vos discussions.";
+"How you want to hear about new messages." = "Comment être prévenu des nouveaux messages.";
+"Keep your chats to yourself." = "Gardez vos discussions pour vous.";
+"Skip" = "Passer";
+"Continue" = "Continuer";
+"Welcome to WhatsApp Zen" = "Bienvenue dans WhatsApp Zen";
+"A light, native WhatsApp for your Mac. Let's set it up the way you like it; everything here can be changed later in Settings." = "Un WhatsApp léger et natif pour votre Mac. Configurons-le à votre goût ; tout peut être modifié plus tard dans Réglages.";
+"How does this look?" = "Ça rend comment ?";
+"Just right 👌" = "Parfait 👌";
+"Run Setup Again…" = "Relancer la configuration…";

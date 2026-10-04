@@ -332,3 +332,16 @@
 "A separate look for %@" = "A separate look for %@";
 "Theme, colours, background and message style below apply to this account only." = "Theme, colours, background and message style below apply to this account only.";
 "All accounts share one look. Turn this on to style this account differently." = "All accounts share one look. Turn this on to style this account differently.";
+"How strongly the colours tint the window" = "How strongly the colours tint the window";
+"Pick your colours" = "Pick your colours";
+"Drag the dot, or add a second one for a gradient." = "Drag the dot, or add a second one for a gradient.";
+"How conversations should look." = "How conversations should look.";
+"How you want to hear about new messages." = "How you want to hear about new messages.";
+"Keep your chats to yourself." = "Keep your chats to yourself.";
+"Skip" = "Skip";
+"Continue" = "Continue";
+"Welcome to WhatsApp Zen" = "Welcome to WhatsApp Zen";
+"A light, native WhatsApp for your Mac. Let's set it up the way you like it; everything here can be changed later in Settings." = "A light, native WhatsApp for your Mac. Let's set it up the way you like it; everything here can be changed later in Settings.";
+"How does this look?" = "How does this look?";
+"Just right 👌" = "Just right 👌";
+"Run Setup Again…" = "Run Setup Again…";

@@ -128,6 +128,12 @@ private struct GeneralSettings: View {
             Section {
                 Toggle(L("Turn emoticons like :) into emoji"), isOn: $prefs.emoticons)
             }
+            Section {
+                Button(L("Run Setup Again…")) {
+                    model.showingSettings = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { model.showingSetup = true }
+                }
+            }
             Section(L("Language")) {
                 Text(L("The app follows the language set for it in System Settings.")).foregroundStyle(.secondary)
                 Button(L("Open Language Settings…")) { NSWorkspace.shared.open(Links.languageSettings) }

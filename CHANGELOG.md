@@ -2,6 +2,11 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.7.0
+
+- A theme picker in the manner of Arc and Zen: drag a dot across a colour field, add a second for a gradient, choose light or dark, set how strongly the colours tint the window
+- A first-run setup that walks through colours, message style, notifications and privacy (Settings → General → Run Setup Again…)
+
 ## 0.6.3
 
 - Each account can have a look of its own: theme, accent colour, chat background, font and bubble style (Settings → Appearance → "A separate look for…"). Switching accounts switches the look.

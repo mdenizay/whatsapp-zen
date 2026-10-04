@@ -61,9 +61,20 @@ struct MainView: View {
         .sheet(isPresented: Binding(get: { model.releaseNotes != nil }, set: { if !$0 { model.releaseNotes = nil } })) {
             ReleaseNotesSheet(notes: model.releaseNotes ?? "")
         }
+        .sheet(isPresented: $model.showingSetup) { SetupWizard() }
         .onAppear {
+            guard !AppStore.isDemo || ProcessInfo.processInfo.environment["WA_SETUP"] != nil else { return }
+            if !Prefs.shared.onboarded {
+                // A brand-new install gets the setup; someone updating from a
+                // version without it already has their preferences.
+                let fresh = Prefs.shared.notesShownFor.isEmpty
+                Prefs.shared.onboarded = true
+                Prefs.shared.notesShownFor = Links.version
+                if fresh { model.showingSetup = true }
+                return
+            }
             // After an update, say what changed, once.
-            guard !AppStore.isDemo, Prefs.shared.notesShownFor != Links.version else { return }
+            guard Prefs.shared.notesShownFor != Links.version else { return }
             Prefs.shared.notesShownFor = Links.version
             model.releaseNotes = ReleaseNotes.current()
         }
@@ -642,6 +653,12 @@ struct ChatWallpaper: View {
                 Theme.accent.opacity(0.07)
             case "gradient":
                 LinearGradient(colors: [Theme.accent.opacity(0.16), Theme.accent.opacity(0.03)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            case "theme":
+                // The theme picker's colours: one colour fading out, or two blending.
+                let first = Color(hex: prefs.customAccent)
+                let second = prefs.themeColor2 >= 0 ? Color(hex: prefs.themeColor2) : first.opacity(0.15)
+                LinearGradient(colors: [first, second], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    .opacity(prefs.themeIntensity)
             case "image":
                 if let picture = prefs.wallpaperPicture() {
                     GeometryReader { geo in

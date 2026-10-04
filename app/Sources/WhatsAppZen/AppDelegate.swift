@@ -323,6 +323,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 if let view = window.attachedSheet?.contentView { save(view, "photo.png") }
                 exit(0)
             }
+            if ProcessInfo.processInfo.environment["WA_SETUP"] != nil {
+                model.showingSetup = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [self] in
+                    if let view = window.attachedSheet?.contentView { save(view, "setup.png") }
+                    exit(0)
+                }
+                return
+            }
             if ProcessInfo.processInfo.environment["WA_ATTACH"] != nil {
                 if let popover = NSApp.windows.first(where: { $0 !== window && $0.isVisible && $0.className.contains("Popover") }),
                    let view = popover.contentView { save(view, "attach.png") }

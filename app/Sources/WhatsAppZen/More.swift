@@ -777,13 +777,8 @@ struct AppearanceSettings: View {
                     ? L("Theme, colours, background and message style below apply to this account only.")
                     : L("All accounts share one look. Turn this on to style this account differently."))
             }
-            Section {
-                Picker(L("Theme"), selection: $prefs.appearance) {
-                    Text(L("System")).tag("system")
-                    Text(L("Light")).tag("light")
-                    Text(L("Dark")).tag("dark")
-                }
-                .pickerStyle(.segmented)
+            Section(L("Theme")) {
+                ThemePicker().padding(.vertical, 4)
             }
             Section(L("Accent Color")) {
                 HStack(spacing: 10) {
@@ -802,6 +797,7 @@ struct AppearanceSettings: View {
             Section(L("Chat Background")) {
                 Picker(L("Background"), selection: $prefs.wallpaper) {
                     Text(L("Plain")).tag("none")
+                    Text(L("Theme")).tag("theme")
                     Text(L("Tint")).tag("tint")
                     Text(L("Gradient")).tag("gradient")
                     Text(L("Picture")).tag("image")
