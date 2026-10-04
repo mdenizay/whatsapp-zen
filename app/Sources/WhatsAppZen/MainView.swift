@@ -395,7 +395,14 @@ struct ChatView: View {
                         Button(L("Older messages")) {
                             let anchor = store.messages.first?.id
                             store.loadOlder {
-                                if let anchor { proxy.scrollTo(anchor, anchor: .top) }
+                                // Stay on the message that was first, with the
+                                // older ones now above it. Repeated because the
+                                // new rows only get their real heights once they
+                                // are laid out, which moves everything below.
+                                guard let anchor else { return }
+                                for delay in [0, 0.08, 0.3, 0.7] {
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { proxy.scrollTo(anchor, anchor: .top) }
+                                }
                             }
                         }
                         .buttonStyle(.glass)
@@ -983,7 +990,11 @@ struct ComposerBar: View {
         .padding(.horizontal, 14)
         .padding(.bottom, 12)
         .padding(.top, 4)
-        .onAppear { focused = true }
+        .onAppear { focusSoon() }
+        // The composer outlives a change of chat, so it has to ask for the
+        // keyboard again each time; the click that picked the chat left the
+        // focus in the chat list.
+        .onChange(of: panelChat?.jid) { _, _ in focusSoon() }
         .onChange(of: reply?.id) { _, _ in focused = true }
         .onChange(of: editing?.id) { _, _ in focused = true }
         .onChange(of: image?.id) { _, _ in focused = true }
@@ -1034,6 +1045,12 @@ struct ComposerBar: View {
         } else {
             submit()
         }
+    }
+
+    /// Takes the keyboard once the click that led here has finished.
+    private func focusSoon() {
+        focused = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { focused = true }
     }
 
     /// Sends, converting an emoticon that was typed last and never followed by a space.

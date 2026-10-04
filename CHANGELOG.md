@@ -2,6 +2,11 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.7.7
+
+- Opening a chat puts the cursor in the message field again, so you can type straight away
+- Loading older messages keeps your place instead of jumping
+
 ## 0.7.6
 
 - Touch ID now comes up when asked for from the menu bar panel (app lock or a locked chat)
