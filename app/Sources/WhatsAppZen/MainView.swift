@@ -671,6 +671,56 @@ struct ChatWallpaper: View {
     }
 }
 
+/// The + panel: everything that can be added to a message, as a grid of
+/// coloured tiles. A nil choice stands for the emoji palette.
+struct AttachGrid: View {
+    let pick: (AttachKind?) -> Void
+
+    private static let items: [(kind: AttachKind?, title: String, icon: String, color: Color)] = [
+        (.media, "Photo or Video", "photo.fill.on.rectangle.fill", Color(light: 0x7C5CE0, dark: 0x9B7DF2)),
+        (.file, "File", "doc.fill", Color(light: 0x2F80ED, dark: 0x5A9DF5)),
+        (.sticker, "Sticker", "face.smiling.inverse", Color(light: 0xF2994A, dark: 0xF5AD6E)),
+        (.poll, "Poll", "chart.bar.fill", Color(light: 0xEB5757, dark: 0xF07C7C)),
+        (.contact, "Contact", "person.crop.circle.fill", Color(light: 0x1DAA61, dark: 0x25C46B)),
+        (.location, "Location", "location.fill", Color(light: 0x00A3A3, dark: 0x2CC7C7)),
+        (nil, "Emoji", "character.bubble.fill", Color(light: 0xE0A100, dark: 0xF2BE3A)),
+    ]
+
+    var body: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.fixed(76), spacing: 6), count: 4), spacing: 12) {
+            ForEach(Self.items, id: \.title) { item in
+                AttachTile(title: L(item.title), icon: item.icon, color: item.color) { pick(item.kind) }
+            }
+        }
+        .padding(14)
+    }
+}
+
+private struct AttachTile: View {
+    let title: String
+    let icon: String
+    let color: Color
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                Image(systemName: icon).font(.system(size: 19, weight: .medium)).foregroundStyle(.white)
+                    .frame(width: 46, height: 46)
+                    .background(color.gradient, in: Circle())
+                    .scaleEffect(hovering ? 1.08 : 1)
+                Text(title).font(.caption).lineLimit(1).minimumScaleFactor(0.75)
+            }
+            .frame(width: 76)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.snappy(duration: 0.15), value: hovering)
+    }
+}
+
 /// What the + menu of the composer can add.
 enum AttachKind {
     case media, file, poll, contact, sticker, location
@@ -701,6 +751,8 @@ struct ComposerBar: View {
     let onSend: () -> Void
 
     @FocusState private var focused: Bool
+    /// WA_ATTACH (demo snapshots) starts with the + panel open.
+    @State private var attaching = ProcessInfo.processInfo.environment["WA_ATTACH"] != nil
     @StateObject private var recorder = VoiceRecorder()
 
     /// With nothing typed or attached, the send button records instead.
@@ -721,30 +773,27 @@ struct ComposerBar: View {
         GlassEffectContainer(spacing: 8) {
             HStack(alignment: .bottom, spacing: 8) {
                 if let onAttach {
-                    Menu {
-                        Button(L("Photo or Video…"), systemImage: "photo.on.rectangle") { onAttach(.media) }
-                        Button(L("File…"), systemImage: "doc") { onAttach(.file) }
-                        Divider()
-                        Button(L("Sticker…"), systemImage: "face.smiling") { onAttach(.sticker) }
-                        Button(L("Poll…"), systemImage: "chart.bar") { onAttach(.poll) }
-                        Button(L("Contact…"), systemImage: "person.crop.circle") { onAttach(.contact) }
-                        Button(L("My Location"), systemImage: "location") { onAttach(.location) }
-                        Divider()
-                        Button(L("Emoji & Symbols"), systemImage: "smiley") {
-                            focused = true
-                            NSApp.orderFrontCharacterPalette(nil)
-                        }
-                    } label: {
+                    Button { attaching.toggle() } label: {
                         Image(systemName: "plus").font(.system(size: 15, weight: .medium))
+                            .rotationEffect(.degrees(attaching ? 45 : 0))
                             .frame(width: Self.height, height: Self.height)
                             .contentShape(Circle())
                     }
-                    .menuStyle(.button)
                     .buttonStyle(.plain)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
                     .glassEffect(.regular.interactive(), in: Circle())
+                    .animation(.snappy(duration: 0.2), value: attaching)
                     .help(L("Attach a photo, video or file"))
+                    .popover(isPresented: $attaching, arrowEdge: .top) {
+                        AttachGrid { kind in
+                            attaching = false
+                            if let kind {
+                                onAttach(kind)
+                            } else {
+                                focused = true
+                                NSApp.orderFrontCharacterPalette(nil)
+                            }
+                        }
+                    }
                 }
                 if recorder.recording {
                     Button { recorder.cancel() } label: {

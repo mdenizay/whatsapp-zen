@@ -41,6 +41,7 @@ struct MessageRow: View {
     @State private var hovering = false
     @State private var picking = false
     @State private var confirmDelete = false
+    @State private var stickerMenu = false
 
     private var mine: Bool { message.fromMe }
     private var secondary: Color { mine ? .white.opacity(0.78) : .secondary }
@@ -124,8 +125,32 @@ struct MessageRow: View {
         switch message.type {
         case "image", "sticker":
             MediaImageView(message: message, preview: { path in
-                if let view = actions.view, message.type == "image" { view(message) } else { actions.preview(path) }
+                if message.type == "sticker" {
+                    // A click on a sticker offers to keep it.
+                    stickerMenu = true
+                } else if let view = actions.view {
+                    view(message)
+                } else {
+                    actions.preview(path)
+                }
             })
+                .popover(isPresented: $stickerMenu, arrowEdge: .bottom) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Button(message.starred ? L("Remove from Favorites") : L("Add to Favorites"),
+                               systemImage: message.starred ? "star.slash" : "star.fill") {
+                            store.star(message, !message.starred)
+                            stickerMenu = false
+                        }
+                        if let forward = actions.forward {
+                            Button(L("Forward"), systemImage: "arrowshape.turn.up.right") {
+                                stickerMenu = false
+                                forward(message)
+                            }
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .padding(12)
+                }
                 .overlay(alignment: .bottomTrailing) {
                     if bare {
                         meta.foregroundStyle(.white)

@@ -2,6 +2,11 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.6.1
+
+- The + button opens a panel of coloured tiles instead of a plain menu
+- Click a sticker in a chat to add it to your favourites
+
 ## 0.6.0
 
 More ways to make it yours, in Settings → Appearance:
