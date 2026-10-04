@@ -12,7 +12,7 @@ ZIP="$ROOT/dist/WhatsApp-Zen-$VERSION.zip"
 
 "$ROOT/build.sh"
 rm -f "$ZIP"
-ditto -c -k --keepParent "$ROOT/dist/WhatsApp Zen.app" "$ZIP"
+ditto -c -k --norsrc --noextattr --noqtn --keepParent "$ROOT/dist/WhatsApp Zen.app" "$ZIP"
 
 # Notarize when the app is Developer ID signed and credentials are stored
 # (xcrun notarytool store-credentials whatsapp-zen ...). The ticket is stapled
@@ -26,7 +26,7 @@ if [[ "$SIGNATURE" == *"Authority=Developer ID Application"* ]]; then
         xcrun notarytool submit "$ZIP" --keychain-profile whatsapp-zen --wait
         xcrun stapler staple "$ROOT/dist/WhatsApp Zen.app"
         rm -f "$ZIP"
-        ditto -c -k --keepParent "$ROOT/dist/WhatsApp Zen.app" "$ZIP"
+        ditto -c -k --norsrc --noextattr --noqtn --keepParent "$ROOT/dist/WhatsApp Zen.app" "$ZIP"
         NOTARIZED=yes
     fi
 fi
