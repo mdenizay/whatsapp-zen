@@ -1,7 +1,6 @@
 /* English is the source language: keys are the English text. */
 "Open the app" = "Open the app";
 "Quit" = "Quit";
-"About WhatsApp" = "About WhatsApp";
 "Hide" = "Hide";
 "Edit" = "Edit";
 "Undo" = "Undo";
@@ -69,9 +68,7 @@
 "Message Preview" = "Message Preview";
 "Send Test Notification" = "Send Test Notification";
 "System Notification Settings…" = "System Notification Settings…";
-"App" = "App";
 "Open at Login" = "Open at Login";
-"Log Out of This Account" = "Log Out of This Account";
 "Settings" = "Settings";
 "New Chat" = "New Chat";
 "Log out of %@?" = "Log out of %@?";
@@ -155,3 +152,19 @@
 "The change was refused; the person's privacy settings may not allow it" = "The change was refused; the person's privacy settings may not allow it";
 "WhatsApp rejected this client version as outdated" = "WhatsApp rejected this client version as outdated";
 "Edit menu" = "Edit";
+"Settings…" = "Settings…";
+"General" = "General";
+"Accounts" = "Accounts";
+"About" = "About";
+"Language" = "Language";
+"The app follows the language set for it in System Settings." = "The app follows the language set for it in System Settings.";
+"Open Language Settings…" = "Open Language Settings…";
+"Source Code" = "Source Code";
+"Contributors" = "Contributors";
+"Version %@" = "Version %@";
+"Made by Mehmet Deniz Aydın" = "Made by Mehmet Deniz Aydın";
+"An unofficial client. Not affiliated with WhatsApp or Meta." = "An unofficial client. Not affiliated with WhatsApp or Meta.";
+"Built on whatsmeow by Tulir Asokan. Icon glyph from Simple Icons." = "Built on whatsmeow by Tulir Asokan. Icon glyph from Simple Icons.";
+"Not paired" = "Not paired";
+"Notifications are blocked in macOS." = "Notifications are blocked in macOS.";
+"About WhatsApp Zen" = "About WhatsApp Zen";

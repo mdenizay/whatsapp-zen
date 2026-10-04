@@ -57,11 +57,9 @@ private enum ChatFilter: String, CaseIterable {
 struct Sidebar: View {
     @EnvironmentObject var store: AppStore
     @EnvironmentObject var model: AppModel
-    @ObservedObject private var notifier = Notifier.shared
     @Binding var newChat: Bool
     @State private var query = ""
     @State private var filter = ChatFilter.all
-    @State private var confirmLogout = false
 
     private var chats: [Chat] {
         let shown = store.chats.filter { chat in
@@ -120,28 +118,12 @@ struct Sidebar: View {
             HStack(spacing: 8) {
                 AccountMenu()
                 Spacer(minLength: 4)
-                Menu {
-                    Section(L("Notifications")) {
-                        if !notifier.permitted {
-                            Button(L("Allow in macOS…"), systemImage: "exclamationmark.triangle") { notifier.openSystemSettings() }
-                        }
-                        Toggle(L("Show Notifications"), isOn: $notifier.enabled)
-                        Toggle(L("Play Sound"), isOn: $notifier.sound)
-                        Toggle(L("Message Preview"), isOn: $notifier.preview)
-                        Button(L("Send Test Notification")) { notifier.postTest() }
-                        Button(L("System Notification Settings…")) { notifier.openSystemSettings() }
-                    }
-                    Section(L("App")) {
-                        Toggle(L("Open at Login"), isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
-                    }
-                    Divider()
-                    Button(L("Log Out of This Account"), role: .destructive) { confirmLogout = true }
+                Button {
+                    NSApp.sendAction(#selector(AppDelegate.showSettings), to: nil, from: nil)
                 } label: {
-                    Image(systemName: "gearshape")
+                    Image(systemName: "gearshape").contentShape(Rectangle())
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
+                .buttonStyle(.plain)
                 .help(L("Settings"))
             }
             .padding(.horizontal, 14)
@@ -156,11 +138,6 @@ struct Sidebar: View {
                 Button(L("New Chat"), systemImage: "square.and.pencil") { newChat = true }
                     .help(L("New Chat"))
             }
-        }
-        .confirmationDialog(L("Log out of %@?", store.label), isPresented: $confirmLogout) {
-            Button(L("Log Out"), role: .destructive) { store.logout() }
-        } message: {
-            Text(L("The chat history on this Mac will be deleted. Messages on your phone are not affected."))
         }
     }
 }

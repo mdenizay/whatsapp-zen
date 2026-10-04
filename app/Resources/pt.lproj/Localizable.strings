@@ -1,6 +1,5 @@
 "Open the app" = "Abrir o app";
 "Quit" = "Encerrar";
-"About WhatsApp" = "Sobre o WhatsApp";
 "Hide" = "Ocultar";
 "Edit" = "Editar";
 "Undo" = "Desfazer";
@@ -68,9 +67,7 @@
 "Message Preview" = "Pré-visualização da mensagem";
 "Send Test Notification" = "Enviar notificação de teste";
 "System Notification Settings…" = "Ajustes de notificação do sistema…";
-"App" = "App";
 "Open at Login" = "Abrir ao iniciar sessão";
-"Log Out of This Account" = "Sair desta conta";
 "Settings" = "Configurações";
 "New Chat" = "Nova conversa";
 "Log out of %@?" = "Sair de %@?";
@@ -154,3 +151,19 @@
 "The change was refused; the person's privacy settings may not allow it" = "A alteração foi recusada; as configurações de privacidade da pessoa podem não permitir";
 "WhatsApp rejected this client version as outdated" = "O WhatsApp rejeitou esta versão do cliente por estar desatualizada";
 "Edit menu" = "Editar";
+"Settings…" = "Ajustes…";
+"General" = "Geral";
+"Accounts" = "Contas";
+"About" = "Sobre";
+"Language" = "Idioma";
+"The app follows the language set for it in System Settings." = "O app usa o idioma definido para ele nos Ajustes do Sistema.";
+"Open Language Settings…" = "Abrir ajustes de idioma…";
+"Source Code" = "Código-fonte";
+"Contributors" = "Colaboradores";
+"Version %@" = "Versão %@";
+"Made by Mehmet Deniz Aydın" = "Criado por Mehmet Deniz Aydın";
+"An unofficial client. Not affiliated with WhatsApp or Meta." = "Cliente não oficial. Sem vínculo com o WhatsApp ou a Meta.";
+"Built on whatsmeow by Tulir Asokan. Icon glyph from Simple Icons." = "Baseado no whatsmeow de Tulir Asokan. Ícone: Simple Icons.";
+"Not paired" = "Não conectado";
+"Notifications are blocked in macOS." = "As notificações estão bloqueadas no macOS.";
+"About WhatsApp Zen" = "Sobre o WhatsApp Zen";

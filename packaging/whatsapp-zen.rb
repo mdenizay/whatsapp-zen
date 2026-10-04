@@ -9,7 +9,7 @@ cask "whatsapp-zen" do
   desc "Unofficial lightweight native WhatsApp client"
   homepage "https://github.com/mdenizay/whatsapp-zen"
 
-  depends_on macos: ">= :tahoe"
+  depends_on macos: :tahoe
   depends_on arch: :arm64
 
   app "WhatsApp Zen.app"

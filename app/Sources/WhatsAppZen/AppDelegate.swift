@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: NSWindow!
     private var statusItem: NSStatusItem!
     private var panel: MenuPanel!
+    private var settingsWindow: NSWindow?
     private var clickMonitors: [Any] = []
     private var subscriptions = Set<AnyCancellable>()
 
@@ -240,6 +241,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             openPanel()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [self] in
                 if let view = panel.contentView { save(view, "menu.png") }
+                showSettings()
+                NSApp.deactivate()
+                RunLoop.current.run(until: Date().addingTimeInterval(1))
+                if let view = settingsWindow?.contentView?.superview { save(view, "settings.png") }
                 NSApp.terminate(nil)
             }
         }
@@ -276,7 +281,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let main = NSMenu()
 
         let app = NSMenu()
-        app.addItem(withTitle: L("About WhatsApp"), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        app.addItem(withTitle: L("About WhatsApp Zen"), action: #selector(AppDelegate.showAbout), keyEquivalent: "")
+        app.addItem(.separator())
+        app.addItem(withTitle: L("Settings…"), action: #selector(AppDelegate.showSettings), keyEquivalent: ",")
         app.addItem(.separator())
         app.addItem(withTitle: L("Hide"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         app.addItem(withTitle: L("Quit"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -306,6 +313,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc func showMainWindow() { showWindow() }
+
+    @objc func showSettings() {
+        if settingsWindow == nil {
+            let window = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.title = L("Settings")
+            window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: SettingsView().environmentObject(model))
+            window.center()
+            settingsWindow = window
+        }
+        closePanel()
+        settingsWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// The standard About panel, with who made the app and where it lives.
+    @objc func showAbout() {
+        let credits = NSMutableAttributedString()
+        let center = NSMutableParagraphStyle()
+        center.alignment = .center
+        let base: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize), .foregroundColor: NSColor.labelColor, .paragraphStyle: center,
+        ]
+        func line(_ text: String, link: URL? = nil) {
+            var attributes = base
+            if let link { attributes[.link] = link }
+            credits.append(NSAttributedString(string: text, attributes: attributes))
+        }
+        line(L("Made by Mehmet Deniz Aydın") + "\n")
+        line("mdenizay.com", link: Links.website)
+        line("  ·  ")
+        line(L("Source Code"), link: Links.source)
+        line("  ·  ")
+        line(L("Contributors"), link: Links.contributors)
+        line("\n\n" + L("Built on whatsmeow by Tulir Asokan. Icon glyph from Simple Icons.") + "\n")
+        line(L("An unofficial client. Not affiliated with WhatsApp or Meta."))
+        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "WhatsApp Zen", .credits: credits])
+        NSApp.activate(ignoringOtherApps: true)
+    }
 }
 
 /// Shows `content` for the active account, rebuilt when the account changes.
