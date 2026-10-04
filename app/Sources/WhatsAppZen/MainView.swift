@@ -117,26 +117,16 @@ struct Sidebar: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack(spacing: 8) {
-                AccountMenu()
-                Spacer(minLength: 4)
-                Button {
-                    model.showingSettings = true
-                } label: {
-                    Image(systemName: "gearshape").contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(L("Settings"))
+            // Only worth the space when something is wrong.
+            if store.state != "connected" {
+                ConnectionDot(connected: false).padding(.vertical, 8)
             }
-            .padding(.horizontal, 14)
-            .frame(height: ComposerBar.height)
-            .glassEffect(.regular, in: Capsule())
-            .padding(.horizontal, 10)
-            .padding(.top, 4)
-            .padding(.bottom, 12)
         }
         .toolbar {
-            ToolbarItem {
+            ToolbarItemGroup {
+                AccountMenu()
+                Button(L("Settings"), systemImage: "gearshape") { model.showingSettings = true }
+                    .help(L("Settings"))
                 Button(L("New Chat"), systemImage: "square.and.pencil") { newChat = true }
                     .help(L("New Chat"))
             }
@@ -582,24 +572,23 @@ struct AccountMenu: View {
                     model.activate(account.id)
                 } label: {
                     let unread = account.totalUnread > 0 ? "  (\(account.totalUnread))" : ""
-                    Label(account.label + unread, systemImage: account.id == store.id ? "checkmark" : "person.crop.circle")
+                    Label(account.label + unread, systemImage: account.icon)
                 }
+                .disabled(account.id == store.id)
             }
             Divider()
             Button(L("Add Account…"), systemImage: "plus") { model.addAccount() }
         } label: {
-            HStack(spacing: 6) {
-                Circle().fill(store.state == "connected" ? Theme.accent : .orange).frame(width: 7, height: 7)
-                Text(store.state == "connected" ? store.label : L("Connecting…")).font(.callout).lineLimit(1)
-                Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
-            }
-            .contentShape(Rectangle())
+            // Just the account's icon; a dot marks a connection in progress.
+            Image(systemName: store.icon)
+                .overlay(alignment: .bottomTrailing) {
+                    if store.state != "connected" {
+                        Circle().fill(.orange).frame(width: 6, height: 6).offset(x: 2, y: 2)
+                    }
+                }
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
         .menuIndicator(.hidden)
-        .fixedSize()
-        .help(L("Switch account"))
+        .help(store.label)
     }
 }
 

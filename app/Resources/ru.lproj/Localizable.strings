@@ -185,3 +185,5 @@
 "The update has been downloaded. It is installed when you restart the app." = "Обновление загружено. Оно будет установлено при перезапуске приложения.";
 "The update could not be unpacked." = "Не удалось распаковать обновление.";
 "The update is not signed by the developer of this app." = "Обновление не подписано разработчиком этого приложения.";
+"Name" = "Имя";
+"Icon" = "Значок";

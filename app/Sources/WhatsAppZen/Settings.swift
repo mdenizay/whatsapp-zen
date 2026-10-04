@@ -151,12 +151,7 @@ private struct AccountSettings: View {
             Section {
                 ForEach(model.accounts) { account in
                     HStack(spacing: 10) {
-                        AvatarView(jid: account.me, name: account.label, size: 30)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(account.label)
-                            Text(account.me.isEmpty ? L("Not paired") : (account.state == "connected" ? L("Connected") : L("Connecting…")))
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
+                        AccountRowEditor(account: account)
                         Spacer()
                         if account.id == model.activeID {
                             Image(systemName: "checkmark").foregroundStyle(Theme.accent)
@@ -182,6 +177,33 @@ private struct AccountSettings: View {
             }
         } message: {
             Text(L("The chat history on this Mac will be deleted. Messages on your phone are not affected."))
+        }
+    }
+}
+
+/// Icon and name of one account, editable in place.
+private struct AccountRowEditor: View {
+    @ObservedObject var account: AppStore
+
+    var body: some View {
+        Menu {
+            ForEach(AppStore.icons, id: \.self) { icon in
+                Button { account.icon = icon } label: { Image(systemName: icon) }
+            }
+        } label: {
+            Image(systemName: account.icon).font(.title3).foregroundStyle(Theme.accent).frame(width: 26)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(L("Icon"))
+        VStack(alignment: .leading, spacing: 1) {
+            TextField(L("Name"), text: $account.nickname, prompt: Text(account.phone.isEmpty ? L("New account") : account.phone))
+                .textFieldStyle(.plain)
+                .labelsHidden()
+            Text(account.me.isEmpty ? L("Not paired")
+                : account.phone + " · " + (account.state == "connected" ? L("Connected") : L("Connecting…")))
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 }

@@ -185,3 +185,5 @@
 "The update has been downloaded. It is installed when you restart the app." = "La actualización se ha descargado. Se instala al reiniciar la app.";
 "The update could not be unpacked." = "No se pudo descomprimir la actualización.";
 "The update is not signed by the developer of this app." = "La actualización no está firmada por el desarrollador de esta app.";
+"Name" = "Nombre";
+"Icon" = "Icono";

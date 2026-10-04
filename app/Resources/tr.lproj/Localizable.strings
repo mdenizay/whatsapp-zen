@@ -185,3 +185,5 @@
 "The update has been downloaded. It is installed when you restart the app." = "Güncelleme indirildi. Uygulamayı yeniden başlattığında kurulur.";
 "The update could not be unpacked." = "Güncelleme açılamadı.";
 "The update is not signed by the developer of this app." = "Güncelleme bu uygulamanın geliştiricisi tarafından imzalanmamış.";
+"Name" = "Ad";
+"Icon" = "Simge";

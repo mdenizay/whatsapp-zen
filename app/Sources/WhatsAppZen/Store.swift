@@ -31,7 +31,11 @@ final class AppStore: ObservableObject, Identifiable {
     /// The account this store belongs to; also its folder name in the core.
     let id: String
 
-    init(id: String) { self.id = id }
+    init(id: String) {
+        self.id = id
+        nickname = UserDefaults.standard.string(forKey: "account.\(id).name") ?? ""
+        icon = UserDefaults.standard.string(forKey: "account.\(id).icon") ?? Self.icons[0]
+    }
 
     static let dataDir: URL = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -82,10 +86,30 @@ final class AppStore: ObservableObject, Identifiable {
         NSApp.isActive && AppModel.shared.windowVisible && AppModel.shared.active === self
     }
 
-    /// How the account is named in menus: its phone number once paired.
-    var label: String {
-        guard let user = me.split(separator: "@").first, !user.isEmpty else { return L("New account") }
+    /// A name the user gave this account ("Personal", "Work"); empty for none.
+    @Published var nickname = "" {
+        didSet { UserDefaults.standard.set(nickname, forKey: "account.\(id).name") }
+    }
+    /// The SF Symbol that stands for this account in the toolbar.
+    @Published var icon = AppStore.icons[0] {
+        didSet { UserDefaults.standard.set(icon, forKey: "account.\(id).icon") }
+    }
+
+    static let icons = [
+        "person.crop.circle.fill", "briefcase.fill", "house.fill", "building.2.fill", "heart.fill", "star.fill",
+        "graduationcap.fill", "cart.fill", "gamecontroller.fill", "airplane", "wrench.and.screwdriver.fill", "leaf.fill",
+    ]
+
+    /// The account's phone number once paired.
+    var phone: String {
+        guard let user = me.split(separator: "@").first, !user.isEmpty else { return "" }
         return "+\(user)"
+    }
+
+    /// How the account is named in menus: its nickname, else its number.
+    var label: String {
+        if !nickname.isEmpty { return nickname }
+        return phone.isEmpty ? L("New account") : phone
     }
 
     func start() {
