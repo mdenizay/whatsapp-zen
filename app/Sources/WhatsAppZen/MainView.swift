@@ -337,7 +337,7 @@ struct ChatRow: View {
                     if chat.unread > 0 { UnreadBadge(count: chat.unread).opacity(chat.muted ? 0.55 : 1) }
                 }
                 .font(.callout)
-                .lineLimit(1)
+                .lineLimit(prefs.compact ? 1 : prefs.previewLines)
             }
         }
         .padding(.vertical, prefs.compact ? 1 : 5)
@@ -480,7 +480,7 @@ struct ChatView: View {
                 }
             }
         }
-        .background(.background)
+        .background { ChatWallpaper() }
         .navigationTitle(chat.name)
         .toolbar(removing: .title)
         .toolbar {
@@ -638,6 +638,36 @@ extension AppStore {
         } else {
             send(text: text, to: chat, replyTo: reply?.id)
         }
+    }
+}
+
+/// What sits behind a conversation: nothing, a wash of the accent colour, a
+/// gradient, or a picture of the user's choosing.
+struct ChatWallpaper: View {
+    @ObservedObject private var prefs = Prefs.shared
+
+    var body: some View {
+        ZStack {
+            Color(nsColor: .textBackgroundColor)
+            switch prefs.wallpaper {
+            case "tint":
+                Theme.accent.opacity(0.07)
+            case "gradient":
+                LinearGradient(colors: [Theme.accent.opacity(0.16), Theme.accent.opacity(0.03)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            case "image":
+                if let picture = prefs.wallpaperPicture() {
+                    GeometryReader { geo in
+                        Image(nsImage: picture).resizable().scaledToFill()
+                            .frame(width: geo.size.width, height: geo.size.height).clipped()
+                    }
+                    // Faded toward the window colour so messages stay readable.
+                    Color(nsColor: .textBackgroundColor).opacity(prefs.wallpaperDim)
+                }
+            default:
+                EmptyView()
+            }
+        }
+        .ignoresSafeArea()
     }
 }
 

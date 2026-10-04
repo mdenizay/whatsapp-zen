@@ -2,6 +2,23 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.6.0
+
+More ways to make it yours, in Settings → Appearance:
+
+- Light, dark or system theme
+- Any accent colour, not only the presets
+- Chat background: plain, tinted, gradient, or your own picture
+- Message font (standard, rounded, serif, monospaced) and bubble corner roundness
+- 12-hour clock
+- Choose your own quick reactions
+- Chat list: one or two preview lines, round or square profile photos
+
+Stickers:
+
+- Make a sticker out of any picture (＋ → Sticker… → Create from Image…)
+- Keep favourites: right-click a sticker → Add to Favorites; they come first in the picker
+
 ## 0.5.3
 
 - Typed emoticons such as :) ;) :D <3 turn into emoji (can be switched off in Settings → General)

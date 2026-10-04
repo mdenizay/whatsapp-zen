@@ -3,6 +3,7 @@ module wacore
 go 1.27.1
 
 require (
+	github.com/HugoSmits86/nativewebp v1.3.0
 	github.com/mattn/go-sqlite3 v1.14.52
 	go.mau.fi/whatsmeow v0.0.0-20260929112325-8b41cfe6d9c4
 	google.golang.org/protobuf v1.36.12
@@ -23,6 +24,7 @@ require (
 	go.mau.fi/util v0.10.1 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
+	golang.org/x/image v0.24.0 // indirect
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect

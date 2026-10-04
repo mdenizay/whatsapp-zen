@@ -43,6 +43,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             .removeDuplicates()
             .sink { [weak self] unread in self?.showUnread(unread) }
             .store(in: &subscriptions)
+        Prefs.shared.$appearance
+            .receive(on: DispatchQueue.main)
+            .sink { choice in
+                // nil follows the system setting.
+                NSApp.appearance = choice == "light" ? NSAppearance(named: .aqua) : choice == "dark" ? NSAppearance(named: .darkAqua) : nil
+            }
+            .store(in: &subscriptions)
         Prefs.shared.$menuBarCount
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.showUnread(self?.model.totalUnread ?? 0) }

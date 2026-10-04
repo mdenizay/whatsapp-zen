@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-let quickReactions = ["👍", "❤️", "😂", "😮", "😢", "🙏"]
+var quickReactions: [String] { Prefs.shared.quickReactions }
 
 /// What a message row can ask its container to do. The main window and the
 /// menu bar popover each keep their own reply/edit state.
@@ -83,9 +83,10 @@ struct MessageRow: View {
     }
 
     private var shape: UnevenRoundedRectangle {
-        let tail: CGFloat = endsGroup ? 5 : 18
+        let radius = CGFloat(prefs.bubbleRadius)
+        let tail: CGFloat = endsGroup ? min(5, radius) : radius
         return UnevenRoundedRectangle(
-            cornerRadii: .init(topLeading: 18, bottomLeading: mine ? 18 : tail, bottomTrailing: mine ? tail : 18, topTrailing: 18),
+            cornerRadii: .init(topLeading: radius, bottomLeading: mine ? radius : tail, bottomTrailing: mine ? tail : radius, topTrailing: radius),
             style: .continuous)
     }
 
@@ -151,7 +152,7 @@ struct MessageRow: View {
             meta.frame(maxWidth: .infinity, alignment: .trailing)
         } else if !message.text.isEmpty {
             HStack(alignment: .lastTextBaseline, spacing: 8) {
-                Text(Self.linkified(message.text)).font(.system(size: prefs.fontSize)).textSelection(.enabled)
+                Text(Self.linkified(message.text)).font(.system(size: prefs.fontSize, design: prefs.design)).textSelection(.enabled)
                 meta
             }
         } else if !bare {
@@ -239,7 +240,9 @@ struct MessageRow: View {
             if let forward = actions.forward {
                 Button(L("Forward"), systemImage: "arrowshape.turn.up.right") { forward(message) }
             }
-            Button(message.starred ? L("Unstar") : L("Star"), systemImage: message.starred ? "star.slash" : "star") {
+            Button(message.type == "sticker" ? (message.starred ? L("Remove from Favorites") : L("Add to Favorites"))
+                       : (message.starred ? L("Unstar") : L("Star")),
+                   systemImage: message.starred ? "star.slash" : "star") {
                 store.star(message, !message.starred)
             }
             Button(message.pinned ? L("Unpin") : L("Pin"), systemImage: message.pinned ? "pin.slash" : "pin") {

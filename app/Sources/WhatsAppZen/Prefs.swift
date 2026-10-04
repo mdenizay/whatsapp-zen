@@ -15,6 +15,60 @@ final class Prefs: ObservableObject {
     @Published var accent: String = value("accent", "green") { didSet { save("accent", accent) } }
     @Published var compact: Bool = value("compact", false) { didSet { save("compact", compact) } }
 
+    // Personalization
+    /// "system", "light" or "dark".
+    @Published var appearance: String = value("appearance", "system") { didSet { save("appearance", appearance) } }
+    /// The user's own accent colour as 0xRRGGBB, used when `accent` is "custom".
+    @Published var customAccent: Int = value("customAccent", 0x1DAA61) { didSet { save("customAccent", customAccent) } }
+    @Published var bubbleRadius: Double = value("bubbleRadius", 18) { didSet { save("bubbleRadius", bubbleRadius) } }
+    /// "none", "tint", "gradient" or "image".
+    @Published var wallpaper: String = value("wallpaper", "none") { didSet { save("wallpaper", wallpaper) } }
+    @Published var wallpaperPath: String = value("wallpaperPath", "") {
+        didSet {
+            save("wallpaperPath", wallpaperPath)
+            wallpaperImage = nil
+        }
+    }
+    /// How strongly a picture wallpaper is faded toward the window colour.
+    @Published var wallpaperDim: Double = value("wallpaperDim", 0.55) { didSet { save("wallpaperDim", wallpaperDim) } }
+    /// "default", "rounded", "serif" or "monospaced".
+    @Published var fontDesign: String = value("fontDesign", "default") { didSet { save("fontDesign", fontDesign) } }
+    @Published var squareAvatars: Bool = value("squareAvatars", false) { didSet { save("squareAvatars", squareAvatars) } }
+    @Published var hour12: Bool = value("hour12", false) { didSet { save("hour12", hour12) } }
+    @Published var previewLines: Int = value("previewLines", 1) { didSet { save("previewLines", previewLines) } }
+    /// The quick reactions, separated by spaces.
+    @Published var reactions: String = value("reactions", "👍 ❤️ 😂 😮 😢 🙏") { didSet { save("reactions", reactions) } }
+
+    var quickReactions: [String] {
+        let list = reactions.split(separator: " ").map(String.init).filter { !$0.isEmpty }
+        return list.isEmpty ? ["👍", "❤️", "😂", "😮", "😢", "🙏"] : Array(list.prefix(10))
+    }
+
+    var design: Font.Design {
+        switch fontDesign {
+        case "rounded": return .rounded
+        case "serif": return .serif
+        case "monospaced": return .monospaced
+        default: return .default
+        }
+    }
+
+    private var wallpaperImage: NSImage?
+
+    /// The chosen wallpaper picture, decoded once and no larger than a screen.
+    func wallpaperPicture() -> NSImage? {
+        if let wallpaperImage { return wallpaperImage }
+        guard wallpaper == "image", !wallpaperPath.isEmpty,
+              let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: wallpaperPath) as CFURL, nil),
+              let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceThumbnailMaxPixelSize: 2400,
+              ] as CFDictionary) else { return nil }
+        let image = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+        wallpaperImage = image
+        return image
+    }
+
     // Writing
     /// Turn typed emoticons such as :) into emoji.
     @Published var emoticons: Bool = value("emoticons", true) { didSet { save("emoticons", emoticons) } }
@@ -59,7 +113,18 @@ final class Prefs: ObservableObject {
     ]
 
     var accentEntry: (id: String, light: UInt32, dark: UInt32, bubbleLight: UInt32, bubbleDark: UInt32) {
-        Self.accents.first { $0.id == accent } ?? Self.accents[0]
+        if accent == "custom" {
+            // Bubbles carry white text, so they use a darker shade of the colour.
+            let base = UInt32(customAccent)
+            let darker = Self.scale(base, 0.82)
+            return ("custom", base, Self.scale(base, 1.12), darker, Self.scale(base, 0.7))
+        }
+        return Self.accents.first { $0.id == accent } ?? Self.accents[0]
+    }
+
+    private static func scale(_ hex: UInt32, _ factor: Double) -> UInt32 {
+        func channel(_ shift: UInt32) -> UInt32 { UInt32(min(255, Double((hex >> shift) & 0xFF) * factor)) }
+        return channel(16) << 16 | channel(8) << 8 | channel(0)
     }
 }
 

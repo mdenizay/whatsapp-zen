@@ -168,7 +168,8 @@ struct PollComposer: View {
 
 // MARK: Stickers
 
-/// Stickers you have received, to send again.
+/// Stickers to send: favourites first, then the ones seen recently, plus a
+/// way to make a new one out of any picture.
 struct StickerPicker: View {
     @EnvironmentObject var store: AppStore
     let chat: Chat
@@ -178,10 +179,18 @@ struct StickerPicker: View {
     @State private var loaded = false
 
     var body: some View {
-        Group {
+        VStack(spacing: 0) {
+            HStack {
+                Text(L("Stickers")).font(.headline)
+                Spacer()
+                Button(L("Create from Image…"), systemImage: "plus") { create() }
+            }
+            .padding(10)
+            Divider()
             if stickers.isEmpty {
                 Text(loaded ? L("Stickers you receive show up here.") : L("Loading…"))
-                    .foregroundStyle(.secondary).multilineTextAlignment(.center).padding()
+                    .foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity).padding()
             } else {
                 ScrollView {
                     LazyVGrid(columns: Array(repeating: GridItem(.fixed(72)), count: 4), spacing: 8) {
@@ -190,17 +199,58 @@ struct StickerPicker: View {
                                 store.sendSticker(sticker, to: chat.jid)
                                 close()
                             }
+                            .overlay(alignment: .topTrailing) {
+                                if sticker.starred {
+                                    Image(systemName: "star.fill").font(.caption2).foregroundStyle(.yellow).shadow(radius: 1)
+                                }
+                            }
+                            .contextMenu {
+                                Button(sticker.starred ? L("Remove from Favorites") : L("Add to Favorites"),
+                                       systemImage: sticker.starred ? "star.slash" : "star") {
+                                    store.star(sticker, !sticker.starred)
+                                    Task { @MainActor in
+                                        try? await Task.sleep(for: .milliseconds(400))
+                                        stickers = await store.stickers()
+                                    }
+                                }
+                            }
                         }
                     }
                     .padding(10)
                 }
             }
         }
-        .frame(width: 340, height: 320)
+        .frame(width: 340, height: 360)
         .task {
             stickers = await store.stickers()
             loaded = true
         }
+    }
+
+    /// Picks a picture, fits it on a transparent 512-pixel square and sends
+    /// it as a sticker.
+    private func create() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        guard panel.runModal() == .OK, let url = panel.url, let png = Self.squarePNG(url) else { return }
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("wa-sticker-\(UUID().uuidString).png")
+        guard (try? png.write(to: file)) != nil else { return }
+        store.run("send_sticker_image", ["chat": chat.jid, "path": file.path])
+        close()
+    }
+
+    static func squarePNG(_ url: URL, side: Int = 512) -> Data? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceThumbnailMaxPixelSize: side,
+              ] as CFDictionary),
+              let ctx = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        // Centred, keeping its proportions; the rest stays transparent.
+        ctx.draw(image, in: CGRect(x: (side - image.width) / 2, y: (side - image.height) / 2, width: image.width, height: image.height))
+        guard let square = ctx.makeImage() else { return nil }
+        return NSBitmapImageRep(cgImage: square).representation(using: .png, properties: [:])
     }
 }
 
@@ -706,15 +756,25 @@ struct ReleaseNotesSheet: View {
 struct AppearanceSettings: View {
     @ObservedObject private var prefs = Prefs.shared
 
+    private var customColor: Binding<Color> {
+        Binding {
+            Color(light: UInt32(prefs.customAccent), dark: UInt32(prefs.customAccent))
+        } set: { color in
+            guard let rgb = NSColor(color).usingColorSpace(.sRGB) else { return }
+            prefs.customAccent = Int(rgb.redComponent * 255) << 16 | Int(rgb.greenComponent * 255) << 8 | Int(rgb.blueComponent * 255)
+            prefs.accent = "custom"
+        }
+    }
+
     var body: some View {
         Form {
             Section {
-                HStack {
-                    Text(L("Text Size"))
-                    Slider(value: $prefs.fontSize, in: 11...18, step: 1)
-                    Text("\(Int(prefs.fontSize))").monospacedDigit().foregroundStyle(.secondary).frame(width: 22)
+                Picker(L("Theme"), selection: $prefs.appearance) {
+                    Text(L("System")).tag("system")
+                    Text(L("Light")).tag("light")
+                    Text(L("Dark")).tag("dark")
                 }
-                Toggle(L("Compact chat list"), isOn: $prefs.compact)
+                .pickerStyle(.segmented)
             }
             Section(L("Accent Color")) {
                 HStack(spacing: 10) {
@@ -725,8 +785,67 @@ struct AppearanceSettings: View {
                         }
                         .buttonStyle(.plain)
                     }
+                    Spacer()
+                    ColorPicker(L("Custom"), selection: customColor, supportsOpacity: false)
                 }
                 .padding(.vertical, 4)
+            }
+            Section(L("Chat Background")) {
+                Picker(L("Background"), selection: $prefs.wallpaper) {
+                    Text(L("Plain")).tag("none")
+                    Text(L("Tint")).tag("tint")
+                    Text(L("Gradient")).tag("gradient")
+                    Text(L("Picture")).tag("image")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                if prefs.wallpaper == "image" {
+                    HStack {
+                        Text(prefs.wallpaperPath.isEmpty ? L("No picture chosen") : (prefs.wallpaperPath as NSString).lastPathComponent)
+                            .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        Spacer()
+                        Button(L("Choose…")) {
+                            let panel = NSOpenPanel()
+                            panel.allowedContentTypes = [.image]
+                            if panel.runModal() == .OK, let url = panel.url { prefs.wallpaperPath = url.path }
+                        }
+                    }
+                    HStack {
+                        Text(L("Fade"))
+                        Slider(value: $prefs.wallpaperDim, in: 0.2...0.9)
+                    }
+                }
+            }
+            Section(L("Messages")) {
+                HStack {
+                    Text(L("Text Size"))
+                    Slider(value: $prefs.fontSize, in: 11...18, step: 1)
+                    Text("\(Int(prefs.fontSize))").monospacedDigit().foregroundStyle(.secondary).frame(width: 22)
+                }
+                Picker(L("Font"), selection: $prefs.fontDesign) {
+                    Text(L("Standard")).tag("default")
+                    Text(L("Rounded")).tag("rounded")
+                    Text(L("Serif")).tag("serif")
+                    Text(L("Monospaced")).tag("monospaced")
+                }
+                HStack {
+                    Text(L("Bubble Corners"))
+                    Slider(value: $prefs.bubbleRadius, in: 4...22, step: 1)
+                }
+                Toggle(L("12-hour clock"), isOn: $prefs.hour12)
+                HStack {
+                    Text(L("Quick Reactions"))
+                    TextField(L("Quick Reactions"), text: $prefs.reactions).labelsHidden().multilineTextAlignment(.trailing)
+                }
+            }
+            Section(L("Chat List")) {
+                Toggle(L("Compact chat list"), isOn: $prefs.compact)
+                Picker(L("Preview lines"), selection: $prefs.previewLines) {
+                    Text("1").tag(1)
+                    Text("2").tag(2)
+                }
+                .disabled(prefs.compact)
+                Toggle(L("Square profile photos"), isOn: $prefs.squareAvatars)
             }
             Section(L("Menu Bar")) {
                 Toggle(L("Show unread count in the menu bar"), isOn: $prefs.menuBarCount)

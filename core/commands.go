@@ -111,7 +111,11 @@ func (a *App) dispatch(r *Req) (any, error) {
 	case "statuses":
 		return a.queryMessages(`chat=? AND deleted=0 AND ts > strftime('%s','now') - 86400 ORDER BY ts`, statusChat)
 	case "stickers":
-		return a.queryMessages(`type='sticker' AND deleted=0 AND raw IS NOT NULL AND chat != ? ORDER BY ts DESC LIMIT 48`, statusChat)
+		// Favourites (starred stickers) first, then the most recent.
+		return a.queryMessages(`type='sticker' AND deleted=0 AND raw IS NOT NULL AND chat != ?
+			ORDER BY starred DESC, ts DESC LIMIT 72`, statusChat)
+	case "send_sticker_image":
+		return a.sendStickerImage(r.Chat, r.Path)
 	case "chat_media":
 		return a.chatMedia(r.Chat, r.Kind)
 	case "user_info":

@@ -135,7 +135,13 @@ enum Format {
         return f
     }()
 
-    static func time(_ date: Date) -> String { time.string(from: date) }
+    private static let time12: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "h:mm a"
+        return f
+    }()
+
+    static func time(_ date: Date) -> String { (Prefs.shared.hour12 ? time12 : time).string(from: date) }
 
     /// Day heading inside a conversation.
     static func day(_ date: Date) -> String {
@@ -149,7 +155,7 @@ enum Format {
     static func listStamp(_ ts: Int) -> String {
         let date = Date(timeIntervalSince1970: TimeInterval(ts))
         let cal = Calendar.current
-        if cal.isDateInToday(date) { return time.string(from: date) }
+        if cal.isDateInToday(date) { return time(date) }
         if cal.isDateInYesterday(date) { return L("Yesterday") }
         return shortDay.string(from: date)
     }
@@ -157,15 +163,15 @@ enum Format {
     /// Day and time of a message for result lists: just the time for today.
     static func stamp(_ ts: Int) -> String {
         let date = Date(timeIntervalSince1970: TimeInterval(ts))
-        if Calendar.current.isDateInToday(date) { return time.string(from: date) }
-        return "\(listStamp(ts)) \(time.string(from: date))"
+        if Calendar.current.isDateInToday(date) { return time(date) }
+        return "\(listStamp(ts)) \(time(date))"
     }
 
     static func lastSeen(_ ts: Int) -> String {
         let date = Date(timeIntervalSince1970: TimeInterval(ts))
         let cal = Calendar.current
-        if cal.isDateInToday(date) { return L("last seen today at %@", time.string(from: date)) }
-        if cal.isDateInYesterday(date) { return L("last seen yesterday at %@", time.string(from: date)) }
-        return L("last seen %@", "\(shortDay.string(from: date)) \(time.string(from: date))")
+        if cal.isDateInToday(date) { return L("last seen today at %@", time(date)) }
+        if cal.isDateInYesterday(date) { return L("last seen yesterday at %@", time(date)) }
+        return L("last seen %@", "\(shortDay.string(from: date)) \(time(date))")
     }
 }

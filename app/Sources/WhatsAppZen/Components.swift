@@ -71,7 +71,7 @@ struct AvatarView: View {
             }
         }
         .frame(width: size, height: size)
-        .clipShape(Circle())
+        .clipShape(Prefs.shared.squareAvatars ? AnyShape(RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)) : AnyShape(Circle()))
         .task(id: "\(jid)#\(tick)") { image = await Images.avatar(jid: jid, size: size) }
         .accessibilityLabel(name)
     }

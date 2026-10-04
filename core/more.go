@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/HugoSmits86/nativewebp"
+	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
@@ -605,4 +607,86 @@ func (a *App) onViewOnce(info *types.MessageInfo) {
 		"type": "message", "chat": cs, "chat_name": a.nameOf(cs), "msg": a.getMessage(cs, r.ID),
 		"notify": !r.FromMe && time.Since(info.Timestamp) < 2*time.Minute && !a.isMuted(cs),
 	})
+}
+
+// sendStickerImage turns a PNG prepared by the UI (square, transparent
+// padding) into a WebP sticker and sends it. macOS cannot write WebP, so the
+// encoding happens here.
+func (a *App) sendStickerImage(chat, path string) (*MsgJSON, error) {
+	cli, jid, err := a.target(chat)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	src, _, err := image.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	// The encoder is lossless, so a photo can come out large; step the size
+	// down until the sticker is light enough to be accepted everywhere.
+	var data []byte
+	side := 512
+	for _, s := range []int{512, 384, 256, 192} {
+		var buf bytes.Buffer
+		if err := nativewebp.Encode(&buf, scaleSquare(src, s), nil); err != nil {
+			return nil, err
+		}
+		data, side = buf.Bytes(), s
+		if len(data) <= 300<<10 {
+			break
+		}
+	}
+	r := a.newRow(cli, jid, "sticker", "")
+	r.W, r.H = side, side
+	r.MediaPath = filepath.Join(a.dir, "media", safeName(r.ID)+".webp")
+	if err := os.WriteFile(r.MediaPath, data, 0o600); err != nil {
+		r.MediaPath = ""
+	}
+	return a.deliver(cli, jid, r, func() (*waE2E.Message, error) {
+		up, err := cli.Upload(bg, data, whatsmeow.MediaImage)
+		if err != nil {
+			return nil, err
+		}
+		return &waE2E.Message{StickerMessage: &waE2E.StickerMessage{
+			URL: proto.String(up.URL), DirectPath: proto.String(up.DirectPath), MediaKey: up.MediaKey,
+			Mimetype: proto.String("image/webp"), FileEncSHA256: up.FileEncSHA256, FileSHA256: up.FileSHA256,
+			FileLength: proto.Uint64(up.FileLength), Width: proto.Uint32(uint32(side)), Height: proto.Uint32(uint32(side)),
+		}}, nil
+	})
+}
+
+// scaleSquare resamples an image to side×side, averaging the source pixels
+// under each destination pixel and keeping transparency.
+func scaleSquare(src image.Image, side int) image.Image {
+	b := src.Bounds()
+	if b.Dx() == side && b.Dy() == side {
+		return src
+	}
+	dst := image.NewNRGBA(image.Rect(0, 0, side, side))
+	for y := 0; y < side; y++ {
+		y0, y1 := b.Min.Y+y*b.Dy()/side, b.Min.Y+(y+1)*b.Dy()/side
+		for x := 0; x < side; x++ {
+			x0, x1 := b.Min.X+x*b.Dx()/side, b.Min.X+(x+1)*b.Dx()/side
+			var r, g, bl, al, n uint64
+			for sy := y0; sy < max(y1, y0+1); sy++ {
+				for sx := x0; sx < max(x1, x0+1); sx++ {
+					cr, cg, cb, ca := src.At(sx, sy).RGBA() // premultiplied, 16 bit
+					r, g, bl, al, n = r+uint64(cr), g+uint64(cg), bl+uint64(cb), al+uint64(ca), n+1
+				}
+			}
+			i := dst.PixOffset(x, y)
+			if al == 0 {
+				continue
+			}
+			// Back from premultiplied to straight alpha.
+			dst.Pix[i] = uint8(r * 255 / al)
+			dst.Pix[i+1] = uint8(g * 255 / al)
+			dst.Pix[i+2] = uint8(bl * 255 / al)
+			dst.Pix[i+3] = uint8(al / n >> 8)
+		}
+	}
+	return dst
 }
