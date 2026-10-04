@@ -16,7 +16,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: NSWindow!
     private var statusItem: NSStatusItem!
     private var panel: MenuPanel!
-    private var settingsWindow: NSWindow?
     private var clickMonitors: [Any] = []
     private var subscriptions = Set<AnyCancellable>()
 
@@ -263,7 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 closePanel()
                 showSettings()
                 RunLoop.current.run(until: Date().addingTimeInterval(1))
-                if let view = settingsWindow?.contentView?.superview { save(view, "settings.png") }
+                if let view = window.attachedSheet?.contentView { save(view, "settings.png") }
                 NSApp.terminate(nil)
             }
         }
@@ -334,17 +333,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func showMainWindow() { showWindow() }
 
     @objc func showSettings() {
-        if settingsWindow == nil {
-            let window = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            window.title = L("Settings")
-            window.isReleasedWhenClosed = false
-            window.contentView = NSHostingView(rootView: SettingsView().environmentObject(model))
-            window.center()
-            settingsWindow = window
-        }
-        closePanel()
-        settingsWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        showWindow()
+        model.showingSettings = true
     }
 
     /// The standard About panel, with who made the app and where it lives.

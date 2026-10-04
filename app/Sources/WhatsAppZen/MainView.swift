@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 
 struct MainView: View {
     @EnvironmentObject var store: AppStore
+    @EnvironmentObject var model: AppModel
     @State private var newChat = false
 
     private var pairing: Bool {
@@ -30,6 +31,7 @@ struct MainView: View {
             }
         }
         .tint(Theme.accent)
+        .sheet(isPresented: $model.showingSettings) { SettingsView().environmentObject(model) }
         .quickLookPreview($store.previewURL)
         .alert(L("Error"), isPresented: Binding(get: { store.errorText != nil && !pairing }, set: { if !$0 { store.errorText = nil } })) {
             Button(L("OK")) { store.errorText = nil }
@@ -119,7 +121,7 @@ struct Sidebar: View {
                 AccountMenu()
                 Spacer(minLength: 4)
                 Button {
-                    NSApp.sendAction(#selector(AppDelegate.showSettings), to: nil, from: nil)
+                    model.showingSettings = true
                 } label: {
                     Image(systemName: "gearshape").contentShape(Rectangle())
                 }

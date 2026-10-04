@@ -9,6 +9,8 @@ final class AppModel: ObservableObject {
 
     @Published private(set) var accounts: [AppStore] = []
     @Published private(set) var activeID = ""
+    /// Settings are shown as a sheet on the main window.
+    @Published var showingSettings = false
 
     /// Fires for incoming messages that deserve a notification.
     let incoming = PassthroughSubject<(account: AppStore, chat: String, chatName: String, message: Message), Never>()

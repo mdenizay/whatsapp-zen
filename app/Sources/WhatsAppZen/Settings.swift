@@ -13,18 +13,50 @@ enum Links {
     }
 }
 
-/// The Settings window (⌘, or the gear in the sidebar).
+/// Settings, shown as a sheet on the main window (⌘, or the sidebar gear).
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
+    @State private var pane = Pane.general
+
+    private enum Pane: CaseIterable {
+        case general, notifications, accounts, about
+
+        var title: String {
+            switch self {
+            case .general: return L("General")
+            case .notifications: return L("Notifications")
+            case .accounts: return L("Accounts")
+            case .about: return L("About")
+            }
+        }
+    }
 
     var body: some View {
-        TabView {
-            GeneralSettings().tabItem { Label(L("General"), systemImage: "gearshape") }
-            NotificationSettings().tabItem { Label(L("Notifications"), systemImage: "bell.badge") }
-            AccountSettings().tabItem { Label(L("Accounts"), systemImage: "person.2") }
-            AboutSettings().tabItem { Label(L("About"), systemImage: "info.circle") }
+        VStack(spacing: 0) {
+            HStack {
+                Text(L("Settings")).font(.headline)
+                Spacer()
+                Button(L("Done")) { model.showingSettings = false }.keyboardShortcut(.defaultAction)
+            }
+            .padding([.horizontal, .top], 16)
+            Picker(L("Settings"), selection: $pane) {
+                ForEach(Pane.allCases, id: \.self) { Text($0.title) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            Group {
+                switch pane {
+                case .general: GeneralSettings()
+                case .notifications: NotificationSettings()
+                case .accounts: AccountSettings()
+                case .about: AboutSettings()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 600, height: 380)
+        .frame(width: 560, height: 430)
         .tint(Theme.accent)
     }
 }
@@ -100,8 +132,8 @@ private struct AccountSettings: View {
             }
             Section {
                 Button(L("Add Account…"), systemImage: "plus") {
+                    model.showingSettings = false
                     model.addAccount()
-                    NSApp.sendAction(#selector(AppDelegate.showMainWindow), to: nil, from: nil)
                 }
             }
         }
