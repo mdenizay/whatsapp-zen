@@ -268,6 +268,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             try? rep.representation(using: .png, properties: [:])?.write(to: url)
         }
         store.open(store.chats.first?.jid)
+        if ProcessInfo.processInfo.environment["WA_SPLIT"] != nil { store.splitChat = store.chats.dropFirst().first?.jid }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [self] in
             if let view = window.contentView?.superview { save(view, "main.png") }
             if let photo = ProcessInfo.processInfo.environment["WA_PHOTO"] {

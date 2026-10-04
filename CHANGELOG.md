@@ -2,6 +2,14 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.5.1
+
+- Split view lays out properly and widens a narrow window
+- Hiding or showing the chat list no longer jitters
+- Click and hold the chat-list button for a menu of recent chats
+- Groups whose history held nothing displayable were missing from the chat list; they are listed now
+- Event messages in groups are shown
+
 ## 0.5.0
 
 - Photos go through a send screen first: crop, rotate, draw, add arrows and boxes, write a caption; several photos at once

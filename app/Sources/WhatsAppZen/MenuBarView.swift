@@ -135,6 +135,8 @@ struct MenuChatView: View {
     /// Where this conversation is shown.
     enum Mode { case panel, window, split }
     var mode = Mode.panel
+    /// Widest a bubble may be; set by a pane that knows its own width.
+    var bubbleWidth: CGFloat?
     private var detached: Bool { mode != .panel }
 
     @State private var messages: [Message] = []
@@ -148,7 +150,7 @@ struct MenuChatView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 2) {
-                        MessageList(messages: messages, isGroup: chat.isGroup, maxWidth: detached ? 360 : 250, actions: MessageActions(
+                        MessageList(messages: messages, isGroup: chat.isGroup, maxWidth: bubbleWidth ?? (detached ? 360 : 250), actions: MessageActions(
                             reply: { editing = nil; reply = $0 },
                             edit: { reply = nil; editing = $0; text = $0.text },
                             // Media opens in the main window's viewer.

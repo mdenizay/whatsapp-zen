@@ -16,28 +16,31 @@ struct MainView: View {
             if pairing {
                 PairingView()
             } else {
-                NavigationSplitView {
-                    Sidebar(newChat: $model.showingNewChat).navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 420)
+                NavigationSplitView(columnVisibility: Binding(
+                    get: { model.sidebarHidden ? .detailOnly : .all },
+                    set: { model.sidebarHidden = $0 == .detailOnly }
+                )) {
+                    Sidebar(newChat: $model.showingNewChat)
+                        .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 420)
+                        .toolbar(removing: .sidebarToggle)
                 } detail: {
-                    if let chat = store.selectedChat {
-                        if let other = store.chats.first(where: { $0.jid == store.splitChat }), other.jid != chat.jid {
-                            // Two conversations side by side.
-                            HSplitView {
-                                ChatView(chat: chat).id(chat.jid).frame(minWidth: 320)
-                                MenuChatView(chat: other, openApp: { jid in
-                                    store.splitChat = nil
-                                    if let jid { store.openChecked(jid) }
-                                }, back: { store.splitChat = nil }, mode: .split)
-                                    .id(other.jid)
-                                    .frame(minWidth: 300, idealWidth: 380)
-                                    .background(.background)
+                    Group {
+                        if let chat = store.selectedChat {
+                            if let other = store.chats.first(where: { $0.jid == store.splitChat }), other.jid != chat.jid {
+                                SplitChats(chat: chat, other: other)
+                            } else {
+                                ChatView(chat: chat).id(chat.jid)
                             }
                         } else {
-                            ChatView(chat: chat).id(chat.jid)
+                            ContentUnavailableView(L("Select a chat"), systemImage: "bubble.left.and.bubble.right",
+                                                   description: Text(L("Pick a chat on the left, or start a new one.")))
                         }
-                    } else {
-                        ContentUnavailableView(L("Select a chat"), systemImage: "bubble.left.and.bubble.right",
-                                               description: Text(L("Pick a chat on the left, or start a new one.")))
+                    }
+                    .toolbar {
+                        // With the list hidden, its toggle lives here.
+                        if model.sidebarHidden {
+                            ToolbarItem(placement: .navigation) { SidebarToggle() }
+                        }
                     }
                 }
                 .sheet(isPresented: $model.showingNewChat) { NewChatView() }
@@ -66,6 +69,69 @@ struct MainView: View {
         } message: {
             Text(store.errorText ?? "")
         }
+    }
+}
+
+/// Two conversations side by side: the open chat, and a narrower second one.
+struct SplitChats: View {
+    @EnvironmentObject var store: AppStore
+    let chat: Chat
+    let other: Chat
+
+    var body: some View {
+        GeometryReader { geo in
+            // The second pane takes about two fifths, but never squeezes the
+            // main conversation below a usable width.
+            let pane = min(max(geo.size.width * 0.4, 280), max(geo.size.width - 340, 240))
+            HStack(spacing: 0) {
+                ChatView(chat: chat).id(chat.jid)
+                    .frame(width: geo.size.width - pane - 1)
+                    .clipped()
+                Divider()
+                MenuChatView(chat: other, openApp: { jid in
+                    store.splitChat = nil
+                    if let jid { store.openChecked(jid) }
+                }, back: { store.splitChat = nil }, mode: .split, bubbleWidth: pane - 70)
+                    .id(other.jid)
+                    .frame(width: pane)
+                    .background(.background)
+                    .clipped()
+            }
+        }
+        .onAppear {
+            // Two chats need room: widen a narrow window once.
+            guard let window = NSApp.mainWindow ?? NSApp.keyWindow, window.frame.width < 1150,
+                  let screen = window.screen?.visibleFrame else { return }
+            var frame = window.frame
+            frame.size.width = min(1150, screen.width)
+            frame.origin.x = min(frame.origin.x, screen.maxX - frame.width)
+            window.setFrame(frame, display: true, animate: false)
+        }
+    }
+}
+
+/// Shows or hides the chat list. Click toggles; click and hold lists the
+/// recent chats, to switch without opening the list.
+struct SidebarToggle: View {
+    @EnvironmentObject var store: AppStore
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        Menu {
+            ForEach(store.chats.filter { !$0.archived }.prefix(12)) { chat in
+                Button {
+                    store.openChecked(chat.jid)
+                } label: {
+                    Text(chat.unread > 0 ? "\(chat.name)  (\(chat.unread))" : chat.name)
+                }
+            }
+        } label: {
+            Image(systemName: "sidebar.left")
+        } primaryAction: {
+            model.toggleSidebar()
+        }
+        .menuIndicator(.hidden)
+        .help(L("Show or hide chats; hold for recent chats"))
     }
 }
 
@@ -213,6 +279,7 @@ struct Sidebar: View {
                     .help(L("Settings"))
                 Button(L("New Chat"), systemImage: "square.and.pencil") { newChat = true }
                     .help(L("New Chat"))
+                SidebarToggle()
             }
         }
     }

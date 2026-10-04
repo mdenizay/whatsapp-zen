@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import SwiftUI
 
 /// The linked WhatsApp accounts. All of them stay connected and notify; the
 /// windows show one, the active account.
@@ -12,6 +13,15 @@ final class AppModel: ObservableObject {
     /// Settings are shown as a sheet on the main window.
     @Published var showingSettings = false
     @Published var showingNewChat = false
+    @Published var sidebarHidden = false
+
+    /// Shows or hides the chat list at once. Animating it makes the
+    /// conversation re-wrap on every frame, which reads as jitter.
+    func toggleSidebar() {
+        var instant = Transaction()
+        instant.disablesAnimations = true
+        withTransaction(instant) { sidebarHidden.toggle() }
+    }
     @Published var showingSwitcher = false
     @Published var showingStatus = false
     /// Release notes to show once after an update.

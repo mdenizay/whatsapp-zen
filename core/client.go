@@ -370,7 +370,14 @@ func (a *App) refreshGroups(cli *whatsmeow.Client) {
 		return
 	}
 	for _, g := range groups {
+		if g.IsParent {
+			// A community itself is not a chat; its groups are listed on their own.
+			continue
+		}
 		a.setGroupName(a.db, g.JID.String(), g.Name)
+		// A group we are in always belongs in the list, even when nothing in
+		// its history could be shown (only events, system notices, ...).
+		a.db.Exec(`UPDATE chats SET last_ts=? WHERE jid=? AND last_ts=0`, g.GroupCreated.Unix(), g.JID.String())
 	}
 	a.emit(map[string]any{"type": "chats"})
 }
@@ -560,6 +567,16 @@ func extract(m *waE2E.Message) *extracted {
 			x = m.GetPollCreationMessageV3()
 		}
 		return &extracted{typ: "poll", text: x.GetName(), ctx: x.GetContextInfo()}
+	case m.GetEventMessage() != nil:
+		x := m.GetEventMessage()
+		text := "📅 " + x.GetName()
+		if x.GetStartTime() > 0 {
+			text += "\n" + time.Unix(x.GetStartTime(), 0).Format("02.01.2006 15:04")
+		}
+		if x.GetDescription() != "" {
+			text += "\n" + x.GetDescription()
+		}
+		return &extracted{typ: "other", text: text, ctx: x.GetContextInfo()}
 	case m.GetGroupInviteMessage() != nil:
 		return &extracted{typ: "other", text: "✉️ " + T("Group invite") + ": " + m.GetGroupInviteMessage().GetGroupName()}
 	case m.GetCall() != nil:
@@ -739,7 +756,9 @@ func (a *App) onHistory(evt *events.HistorySync) {
 		if err != nil {
 			continue
 		}
-		touchChat(tx, cs, 0)
+		// The conversation's own timestamp places it in the list even if none
+		// of its messages turn out to be displayable.
+		touchChat(tx, cs, int64(conv.GetConversationTimestamp()))
 		if chat.Server == types.GroupServer {
 			a.setGroupName(tx, cs, conv.GetName())
 		}
