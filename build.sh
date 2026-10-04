@@ -30,5 +30,13 @@ cp "$ROOT/app/.build/release/WhatsAppZen" "$APP/Contents/MacOS/"
 cp "$ROOT/app/Info.plist" "$APP/Contents/"
 [ -f "$ROOT/app/AppIcon.icns" ] && cp "$ROOT/app/AppIcon.icns" "$APP/Contents/Resources/"
 cp -R "$ROOT/app/Resources/"* "$APP/Contents/Resources/"
-codesign --force --sign - "$APP"
+# With a Developer ID certificate in the keychain, sign for distribution
+# (hardened runtime, as notarization requires); otherwise sign ad hoc, which
+# runs fine locally but is blocked by Gatekeeper on other Macs.
+IDENTITY="$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)"
+if [ -n "$IDENTITY" ]; then
+    codesign --force --options runtime --timestamp --entitlements "$ROOT/app/WhatsAppZen.entitlements" --sign "$IDENTITY" "$APP"
+else
+    codesign --force --sign - "$APP"
+fi
 echo "==> $APP"
