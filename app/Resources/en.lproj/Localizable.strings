@@ -272,3 +272,7 @@
 "Crop" = "Crop";
 "Rotate" = "Rotate";
 "Reset" = "Reset";
+"Disk Encryption" = "Disk Encryption";
+"FileVault is on. Everything this app stores is encrypted on disk." = "FileVault is on. Everything this app stores is encrypted on disk.";
+"FileVault is off. Messages on this Mac are stored unencrypted." = "FileVault is off. Messages on this Mac are stored unencrypted.";
+"Open FileVault Settings…" = "Open FileVault Settings…";

@@ -526,6 +526,24 @@ struct AppearanceSettings: View {
 
 struct PrivacySettings: View {
     @ObservedObject private var prefs = Prefs.shared
+    /// Whether the disk is encrypted; nil when macOS will not say.
+    @State private var fileVault: Bool? = PrivacySettings.fileVaultStatus()
+
+    /// Asks macOS whether FileVault protects the startup disk.
+    static func fileVaultStatus() -> Bool? {
+        let task = Process()
+        let pipe = Pipe()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/fdesetup")
+        task.arguments = ["status"]
+        task.standardOutput = pipe
+        task.standardError = Pipe()
+        guard (try? task.run()) != nil else { return nil }
+        task.waitUntilExit()
+        let text = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        if text.contains("FileVault is On") { return true }
+        if text.contains("FileVault is Off") { return false }
+        return nil
+    }
 
     var body: some View {
         Form {
@@ -542,9 +560,23 @@ struct PrivacySettings: View {
             } footer: {
                 Text(L("Single chats can be locked from their info panel. Locked chats hide their previews and need Touch ID to open."))
             }
-            Section {
-                Text(L("Messages are stored unencrypted in your Library folder. Turn on FileVault in System Settings to encrypt the disk they are on."))
-                    .foregroundStyle(.secondary)
+            Section(L("Disk Encryption")) {
+                switch fileVault {
+                case true?:
+                    Label(L("FileVault is on. Everything this app stores is encrypted on disk."), systemImage: "lock.shield.fill")
+                        .foregroundStyle(Theme.accent)
+                case false?:
+                    Label(L("FileVault is off. Messages on this Mac are stored unencrypted."), systemImage: "exclamationmark.shield.fill")
+                        .foregroundStyle(.orange)
+                    Button(L("Open FileVault Settings…")) {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?FileVault") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                case nil:
+                    Text(L("Messages are stored unencrypted in your Library folder. Turn on FileVault in System Settings to encrypt the disk they are on."))
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)

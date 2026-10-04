@@ -107,6 +107,7 @@ final class AppStore: ObservableObject, Identifiable {
     static let icons = [
         "person.crop.circle.fill", "briefcase.fill", "house.fill", "building.2.fill", "heart.fill", "star.fill",
         "graduationcap.fill", "cart.fill", "gamecontroller.fill", "airplane", "wrench.and.screwdriver.fill", "leaf.fill",
+        "bubble.left.fill", "phone.fill", "bolt.fill", "flag.fill", "moon.fill", "book.fill",
     ]
 
     /// The account's phone number once paired.

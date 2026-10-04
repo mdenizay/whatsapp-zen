@@ -232,19 +232,36 @@ private struct AccountSettings: View {
 /// Icon and name of one account, editable in place.
 private struct AccountRowEditor: View {
     @ObservedObject var account: AppStore
+    @State private var picking = false
 
     var body: some View {
-        Menu {
-            ForEach(AppStore.icons, id: \.self) { icon in
-                Button { account.icon = icon } label: { Image(systemName: icon) }
-            }
-        } label: {
-            Image(systemName: account.icon).font(.title3).foregroundStyle(Theme.accent).frame(width: 26)
+        Button { picking = true } label: {
+            Image(systemName: account.icon).font(.title3).foregroundStyle(Theme.accent)
+                .frame(width: 34, height: 34)
+                .background(Theme.accent.opacity(0.14), in: Circle())
+                .contentShape(Circle())
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
+        .buttonStyle(.plain)
         .help(L("Icon"))
+        .popover(isPresented: $picking, arrowEdge: .bottom) {
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(38), spacing: 6), count: 6), spacing: 6) {
+                ForEach(AppStore.icons, id: \.self) { icon in
+                    Button {
+                        account.icon = icon
+                        picking = false
+                    } label: {
+                        Image(systemName: icon).font(.system(size: 16))
+                            .foregroundStyle(account.icon == icon ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+                            .frame(width: 38, height: 38)
+                            .background(account.icon == icon ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.quaternary),
+                                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(12)
+        }
         VStack(alignment: .leading, spacing: 1) {
             TextField(L("Name"), text: $account.nickname, prompt: Text(account.phone.isEmpty ? L("New account") : account.phone))
                 .textFieldStyle(.plain)

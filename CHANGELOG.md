@@ -2,6 +2,11 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.4.1
+
+- Settings → Privacy shows whether FileVault is encrypting what the app stores
+- A nicer icon picker for accounts, with more icons
+
 ## 0.4.0
 
 **Finding things**

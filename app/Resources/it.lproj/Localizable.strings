@@ -271,3 +271,7 @@
 "Crop" = "Ritaglia";
 "Rotate" = "Ruota";
 "Reset" = "Ripristina";
+"Disk Encryption" = "Crittografia del disco";
+"FileVault is on. Everything this app stores is encrypted on disk." = "FileVault è attivo. Tutto ciò che questa app salva è crittografato sul disco.";
+"FileVault is off. Messages on this Mac are stored unencrypted." = "FileVault è disattivato. I messaggi su questo Mac sono salvati senza crittografia.";
+"Open FileVault Settings…" = "Apri impostazioni FileVault…";
