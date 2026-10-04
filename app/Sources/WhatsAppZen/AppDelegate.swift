@@ -45,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             .store(in: &subscriptions)
 
         model.start()
+        Updater.shared.start()
         showWindow()
         snapshotIfRequested()
     }

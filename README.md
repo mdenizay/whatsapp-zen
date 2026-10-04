@@ -29,6 +29,8 @@ of the memory of the official app.
   without opening the app
 - Notifications with inline reply
 - Multiple accounts
+- Updates itself from GitHub releases (each download is checked against the
+  developer signature before it is installed)
 - English, Turkish, Russian, French, German, Spanish, Portuguese and Italian;
   follows the system (or per-app) language
 

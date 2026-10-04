@@ -63,11 +63,38 @@ struct SettingsView: View {
 
 private struct GeneralSettings: View {
     @EnvironmentObject var model: AppModel
+    @ObservedObject private var updater = Updater.shared
+
+    private var updateStatus: String {
+        switch updater.state {
+        case .idle: return L("Version %@", Links.version)
+        case .checking: return L("Checking for updates…")
+        case .upToDate: return L("You're up to date.") + " " + L("Version %@", Links.version)
+        case .downloading(let version): return L("Downloading %@…", version)
+        case .ready(let version): return L("Version %@ is ready to install.", version)
+        case .failed(let reason): return L("Update failed: %@", reason)
+        }
+    }
 
     var body: some View {
         Form {
             if let store = model.active {
                 Toggle(L("Open at Login"), isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
+            }
+            if updater.available {
+                Section(L("Updates")) {
+                    Toggle(L("Update automatically"), isOn: $updater.automatic)
+                    HStack {
+                        Text(updateStatus).foregroundStyle(.secondary)
+                        Spacer()
+                        if case .ready = updater.state {
+                            Button(L("Restart to Update")) { updater.installAndRelaunch() }
+                        } else {
+                            Button(L("Check Now")) { updater.check() }
+                                .disabled(updater.state == .checking)
+                        }
+                    }
+                }
             }
             Section(L("Language")) {
                 Text(L("The app follows the language set for it in System Settings.")).foregroundStyle(.secondary)
