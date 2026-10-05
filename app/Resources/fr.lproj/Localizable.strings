@@ -366,3 +366,6 @@
 "Create" = "Créer";
 "No chats in this list yet" = "Aucune discussion dans cette liste";
 "Add Chats…" = "Ajouter des discussions…";
+"Hide These Chats from All" = "Masquer ces discussions de Toutes";
+"Hide these chats from All" = "Masquer ces discussions de Toutes";
+"They are shown only under this list. Unread still shows them." = "Elles n'apparaissent que dans cette liste. Non lues les affiche toujours.";

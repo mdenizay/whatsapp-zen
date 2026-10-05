@@ -366,3 +366,6 @@
 "Create" = "Crea";
 "No chats in this list yet" = "Ancora nessuna chat in questo elenco";
 "Add Chats…" = "Aggiungi chat…";
+"Hide These Chats from All" = "Nascondi queste chat da Tutte";
+"Hide these chats from All" = "Nascondi queste chat da Tutte";
+"They are shown only under this list. Unread still shows them." = "Compaiono solo in questo elenco. Non lette le mostra comunque.";

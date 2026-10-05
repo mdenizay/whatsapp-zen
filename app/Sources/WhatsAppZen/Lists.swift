@@ -3,12 +3,32 @@ import SwiftUI
 /// A group of chats the user put together ("Work", "Clients"). Lists live on
 /// this Mac, one set per account.
 struct ChatList: Codable, Identifiable, Equatable, Hashable {
-    var id = UUID().uuidString
+    var id: String
     var name: String
     var emoji: String
     var chats: [String] = []
+    /// Its chats are left out of All and only shown under the list.
+    var hideFromAll = false
 
     var title: String { emoji.isEmpty ? name : "\(emoji) \(name)" }
+
+    init(id: String = UUID().uuidString, name: String, emoji: String, chats: [String] = [], hideFromAll: Bool = false) {
+        self.id = id
+        self.name = name
+        self.emoji = emoji
+        self.chats = chats
+        self.hideFromAll = hideFromAll
+    }
+
+    // Lists saved before a field existed still load.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        emoji = try c.decodeIfPresent(String.self, forKey: .emoji) ?? ""
+        chats = try c.decodeIfPresent([String].self, forKey: .chats) ?? []
+        hideFromAll = try c.decodeIfPresent(Bool.self, forKey: .hideFromAll) ?? false
+    }
 }
 
 /// What the chat list is showing.
@@ -19,7 +39,8 @@ enum ChatFilter: Hashable {
     func includes(_ chat: Chat, lists: [ChatList]) -> Bool {
         guard chat.archived == (self == .archived) || isList else { return false }
         switch self {
-        case .all, .archived: return true
+        case .archived: return true
+        case .all: return !lists.contains { $0.hideFromAll && $0.chats.contains(chat.jid) }
         case .unread: return chat.unread > 0
         case .groups: return chat.isGroup
         case .list(let id): return lists.first { $0.id == id }?.chats.contains(chat.jid) == true
@@ -108,15 +129,7 @@ struct FilterBar: View {
             if !compact {
                 chip(L("Groups"), .groups)
                 chip(L("Archived"), .archived)
-            }
-            ForEach(store.lists) { list in
-                chip(list.title, .list(list.id), count: store.unreadCount(in: list))
-                    .contextMenu {
-                        Button(L("Edit List…"), systemImage: "pencil") { editor = .edit(list) }
-                        Button(L("Delete List"), systemImage: "trash", role: .destructive) { deleting = list }
-                    }
-            }
-            if !compact {
+                // Next to the fixed filters, so it does not start a line of its own.
                 Button { editor = .new(adding: nil) } label: {
                     Image(systemName: "plus").font(.caption.weight(.semibold))
                         .frame(width: 26, height: 26)
@@ -125,6 +138,18 @@ struct FilterBar: View {
                 }
                 .buttonStyle(.plain)
                 .help(L("New List"))
+            }
+            ForEach(store.lists) { list in
+                chip(list.title, .list(list.id), count: store.unreadCount(in: list))
+                    .contextMenu {
+                        Button(L("Edit List…"), systemImage: "pencil") { editor = .edit(list) }
+                        Toggle(L("Hide These Chats from All"), isOn: Binding(get: { list.hideFromAll }, set: { on in
+                            var updated = list
+                            updated.hideFromAll = on
+                            store.save(list: updated)
+                        }))
+                        Button(L("Delete List"), systemImage: "trash", role: .destructive) { deleting = list }
+                    }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -192,6 +217,7 @@ struct ListEditor: View {
     @State private var name = ""
     @State private var emoji = ""
     @State private var members: [String] = []
+    @State private var hideFromAll = false
     @State private var query = ""
     @FocusState private var nameFocused: Bool
 
@@ -236,6 +262,15 @@ struct ListEditor: View {
                         .buttonStyle(.plain)
                     }
                 }
+                Toggle(isOn: $hideFromAll) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(L("Hide these chats from All"))
+                        Text(L("They are shown only under this list. Unread still shows them."))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+                .controlSize(.small)
             }
             .padding(20)
 
@@ -294,6 +329,7 @@ struct ListEditor: View {
                 name = list.name
                 emoji = list.emoji
                 members = list.chats
+                hideFromAll = list.hideFromAll
             }
             nameFocused = true
         }
@@ -306,6 +342,7 @@ struct ListEditor: View {
         list.name = trimmed
         list.emoji = emoji
         list.chats = members
+        list.hideFromAll = hideFromAll
         store.save(list: list)
         dismiss()
     }

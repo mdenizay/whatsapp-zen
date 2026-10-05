@@ -2,6 +2,11 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.8.1
+
+- The + for a new list sits next to Archived instead of starting a line of its own
+- A list can keep its chats out of All, so they show only under the list (Unread still shows them): switch it on in the list editor or from the list's right-click menu
+
 ## 0.8.0
 
 - Lists: group chats your own way, for example by work or by client. Make one with + next to the filters, pick a name, an emoji and its chats; each list shows how many of its chats are unread

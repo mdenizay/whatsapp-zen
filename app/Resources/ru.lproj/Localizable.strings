@@ -366,3 +366,6 @@
 "Create" = "Создать";
 "No chats in this list yet" = "В этом списке пока нет чатов";
 "Add Chats…" = "Добавить чаты…";
+"Hide These Chats from All" = "Скрыть эти чаты из «Все»";
+"Hide these chats from All" = "Скрыть эти чаты из «Все»";
+"They are shown only under this list. Unread still shows them." = "Они видны только в этом списке. В «Непрочитанных» они остаются.";

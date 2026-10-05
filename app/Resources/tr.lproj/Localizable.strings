@@ -366,3 +366,6 @@
 "Create" = "Oluştur";
 "No chats in this list yet" = "Bu listede henüz sohbet yok";
 "Add Chats…" = "Sohbet Ekle…";
+"Hide These Chats from All" = "Bu Sohbetleri Tümü'nde Gizle";
+"Hide these chats from All" = "Bu sohbetleri Tümü'nde gizle";
+"They are shown only under this list. Unread still shows them." = "Yalnızca bu listede görünürler. Okunmamış'ta yine çıkarlar.";
