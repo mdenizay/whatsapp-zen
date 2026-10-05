@@ -2,6 +2,12 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.8.5
+
+- Save to Downloads: a document in a chat has a download button beside it, which saves the file under its own name; a second click shows it in Finder
+- Photos, videos, voice messages and documents can be saved from the message menu: Save to Downloads, or Save As… to choose the place
+- A file never overwrites one with the same name; it becomes "Name 2.pdf"
+
 ## 0.8.4
 
 - Compact window: a narrow window with a single column, like WhatsApp on the phone. Chats open over the list and ⌘[ (or the arrow beside the name) goes back. Switch it with ⌥⌘C, from View › Compact Mode, or in Settings › Appearance; the window narrows, and widens back when you leave it

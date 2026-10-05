@@ -375,3 +375,7 @@
 "A narrow window with one column, like the phone: chats open over the list, and ⌘[ goes back. ⌥⌘C switches it from anywhere." = "Une fenêtre étroite à une colonne, comme sur le téléphone : les discussions s'ouvrent par-dessus la liste, ⌘[ revient. ⌥⌘C l'active partout.";
 "Dense layout" = "Disposition dense";
 "Smaller rows and tighter messages, to see more at once." = "Des lignes plus petites et des messages plus serrés pour en voir davantage.";
+"Save to Downloads" = "Enregistrer dans Téléchargements";
+"Save As…" = "Enregistrer sous…";
+"Saved to Downloads" = "Enregistré dans Téléchargements";
+"Saved to Downloads. Click to show in Finder." = "Enregistré dans Téléchargements. Cliquez pour l'afficher dans le Finder.";

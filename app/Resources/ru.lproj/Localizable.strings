@@ -375,3 +375,7 @@
 "A narrow window with one column, like the phone: chats open over the list, and ⌘[ goes back. ⌥⌘C switches it from anywhere." = "Узкое окно в одну колонку, как на телефоне: чаты открываются поверх списка, ⌘[ — назад. ⌥⌘C переключает откуда угодно.";
 "Dense layout" = "Плотная компоновка";
 "Smaller rows and tighter messages, to see more at once." = "Строки меньше, сообщения плотнее — видно больше сразу.";
+"Save to Downloads" = "Сохранить в «Загрузки»";
+"Save As…" = "Сохранить как…";
+"Saved to Downloads" = "Сохранено в «Загрузки»";
+"Saved to Downloads. Click to show in Finder." = "Сохранено в «Загрузки». Нажмите, чтобы показать в Finder.";

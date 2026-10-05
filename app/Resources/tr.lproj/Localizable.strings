@@ -375,3 +375,7 @@
 "A narrow window with one column, like the phone: chats open over the list, and ⌘[ goes back. ⌥⌘C switches it from anywhere." = "Telefondaki gibi tek sütunlu dar bir pencere: sohbetler listenin üstünde açılır, ⌘[ geri döner. ⌥⌘C her yerden açıp kapatır.";
 "Dense layout" = "Sık düzen";
 "Smaller rows and tighter messages, to see more at once." = "Daha küçük satırlar ve sık mesajlarla bir bakışta daha fazlasını görün.";
+"Save to Downloads" = "İndirilenler'e Kaydet";
+"Save As…" = "Farklı Kaydet…";
+"Saved to Downloads" = "İndirilenler'e kaydedildi";
+"Saved to Downloads. Click to show in Finder." = "İndirilenler'e kaydedildi. Finder'da göstermek için tıklayın.";

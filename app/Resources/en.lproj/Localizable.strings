@@ -376,3 +376,7 @@
 "A narrow window with one column, like the phone: chats open over the list, and ⌘[ goes back. ⌥⌘C switches it from anywhere." = "A narrow window with one column, like the phone: chats open over the list, and ⌘[ goes back. ⌥⌘C switches it from anywhere.";
 "Dense layout" = "Dense layout";
 "Smaller rows and tighter messages, to see more at once." = "Smaller rows and tighter messages, to see more at once.";
+"Save to Downloads" = "Save to Downloads";
+"Save As…" = "Save As…";
+"Saved to Downloads" = "Saved to Downloads";
+"Saved to Downloads. Click to show in Finder." = "Saved to Downloads. Click to show in Finder.";

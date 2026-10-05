@@ -263,6 +263,18 @@ struct MessageRow: View {
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
                 }
             }
+            if message.hasFile {
+                Button(L("Save to Downloads"), systemImage: "arrow.down.circle") {
+                    Task { @MainActor in
+                        if await Downloads.save(message) == nil { store.errorText = L("Download failed") }
+                    }
+                }
+                Button(L("Save As…"), systemImage: "square.and.arrow.down") {
+                    Task { @MainActor in
+                        if await !Downloads.saveAs(message) { store.errorText = L("Download failed") }
+                    }
+                }
+            }
             Menu(L("React"), systemImage: "face.smiling") {
                 ForEach(quickReactions, id: \.self) { emoji in
                     Button(emoji) { store.react(to: message, with: emoji) }
@@ -487,12 +499,39 @@ struct FileAttachmentView: View {
 
     @State private var busy = false
     @State private var failed = false
+    @State private var saving = false
+    /// Where "save to Downloads" put the file.
+    @State private var saved: URL?
 
     private var isVideo: Bool { message.type == "video" }
     /// Downloading, or still uploading our own file.
     private var working: Bool { busy || (message.fromMe && message.status == Status.pending) }
 
     var body: some View {
+        HStack(spacing: 8) {
+            opener
+            // A document is usually wanted as a file, not only looked at.
+            if !isVideo, !(message.fromMe && message.status == Status.pending) {
+                Button(action: save) {
+                    Group {
+                        if saving {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: saved != nil ? "checkmark.circle.fill" : "arrow.down.circle")
+                                .font(.title3)
+                                .foregroundStyle(onBubble ? AnyShapeStyle(.white) : AnyShapeStyle(Theme.accent))
+                        }
+                    }
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(saved != nil ? L("Saved to Downloads. Click to show in Finder.") : L("Save to Downloads"))
+            }
+        }
+    }
+
+    private var opener: some View {
         Button(action: open) {
             if isVideo, let poster = Images.thumbnail(base64: message.thumb) {
                 let aspect = message.w > 0 && message.h > 0 ? CGFloat(message.w) / CGFloat(message.h) : 16 / 9
@@ -527,7 +566,7 @@ struct FileAttachmentView: View {
                     .frame(width: 36, height: 36)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(isVideo ? L("Video") : (message.fileName ?? L("Document"))).lineLimit(1).truncationMode(.middle)
-                        Text(failed ? L("Download failed") : L("Click to open")).font(.caption)
+                        Text(failed ? L("Download failed") : (saved != nil ? L("Saved to Downloads") : L("Click to open"))).font(.caption)
                             .foregroundStyle(onBubble ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(.secondary))
                     }
                 }
@@ -536,6 +575,20 @@ struct FileAttachmentView: View {
             }
         }
         .buttonStyle(.plain)
+    }
+
+    private func save() {
+        if let saved, FileManager.default.fileExists(atPath: saved.path) {
+            return NSWorkspace.shared.activateFileViewerSelecting([saved])
+        }
+        guard !saving else { return }
+        saving = true
+        failed = false
+        Task { @MainActor in
+            defer { saving = false }
+            saved = await Downloads.save(message)
+            failed = saved == nil
+        }
     }
 
     private func open() {

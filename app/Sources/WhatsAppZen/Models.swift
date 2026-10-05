@@ -84,6 +84,8 @@ struct Message: Decodable, Identifiable, Equatable {
 
     var date: Date { Date(timeIntervalSince1970: TimeInterval(ts)) }
     var isVisual: Bool { type == "image" || type == "sticker" }
+    /// Carries a file that can be saved somewhere.
+    var hasFile: Bool { !deleted && ["image", "video", "document", "audio", "sticker"].contains(type) }
 
     /// What "copy" puts on the pasteboard and what previews show.
     var plainText: String { Message.label(type: type, text: text, fileName: fileName ?? "") }
