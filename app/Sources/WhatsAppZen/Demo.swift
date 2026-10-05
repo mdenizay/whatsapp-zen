@@ -13,6 +13,11 @@ enum Demo {
              lastSender: sender, lastFile: "", archived: false, pinned: user == "900000000001")
     }
 
+    static let lists = [
+        ChatList(id: "demo-work", name: "Work", emoji: "💼", chats: ["120363000000000001@g.us", "900000000002@s.whatsapp.net"]),
+        ChatList(id: "demo-family", name: "Family", emoji: "🏠", chats: ["900000000003@s.whatsapp.net"]),
+    ]
+
     static let chats: [Chat] = [
         chat("900000000001", "Emma Wilson", ago: 120, unread: 2, text: "Does 8 pm work for you?"),
         chat("120363000000000001", "Design Team", group: true, ago: 900, unread: 5, text: "I've uploaded the deck", sender: "Liam"),

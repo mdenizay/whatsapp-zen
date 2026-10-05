@@ -353,3 +353,16 @@
 "Delete for Me" = "Удалить у меня";
 "Delete…" = "Удалить…";
 "The app's folder cannot be written to." = "Нет доступа на запись к папке приложения.";
+"Edit List…" = "Изменить список…";
+"Delete List" = "Удалить список";
+"Delete this list?" = "Удалить этот список?";
+"The chats themselves are not deleted." = "Сами чаты не удаляются.";
+"New List" = "Новый список";
+"New List…" = "Новый список…";
+"Add to List" = "Добавить в список";
+"Edit List" = "Изменить список";
+"Name, e.g. Work or Clients" = "Название, напр. Работа или Клиенты";
+"%lld selected" = "Выбрано: %lld";
+"Create" = "Создать";
+"No chats in this list yet" = "В этом списке пока нет чатов";
+"Add Chats…" = "Добавить чаты…";

@@ -11,6 +11,7 @@ struct MenuBarView: View {
     /// WA_MENU_CHAT (demo snapshots) starts inside the first conversation.
     @State private var opened: String? = ProcessInfo.processInfo.environment["WA_MENU_CHAT"] != nil ? Demo.chats.first?.jid : nil
 
+    @State private var filter = ChatFilter.all
     private var openedChat: Chat? { store.chats.first { $0.jid == opened } }
 
     var body: some View {
@@ -46,9 +47,12 @@ struct MenuBarView: View {
             } else if store.chats.isEmpty {
                 notice(L("No chats yet."))
             } else {
+                if !store.lists.isEmpty {
+                    FilterBar(filter: $filter, editor: .constant(nil), compact: true).padding(.bottom, 6)
+                }
                 ScrollView {
                     LazyVStack(spacing: 2) {
-                        ForEach(store.chats.filter { !$0.archived }.prefix(60)) { chat in
+                        ForEach(store.chats.filter { filter.includes($0, lists: store.lists) }.prefix(60)) { chat in
                             MenuChatRow(chat: chat, typing: store.typing[chat.jid] != nil, tick: store.avatarTick) {
                                 if store.isSealed(chat.jid) {
                                     Auth.unlock(reason: L("Unlock this chat")) { ok in

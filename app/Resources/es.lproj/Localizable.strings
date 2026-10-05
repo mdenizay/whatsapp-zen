@@ -353,3 +353,16 @@
 "Delete for Me" = "Eliminar para mí";
 "Delete…" = "Eliminar…";
 "The app's folder cannot be written to." = "No se puede escribir en la carpeta de la app.";
+"Edit List…" = "Editar lista…";
+"Delete List" = "Eliminar lista";
+"Delete this list?" = "¿Eliminar esta lista?";
+"The chats themselves are not deleted." = "Los chats en sí no se eliminan.";
+"New List" = "Nueva lista";
+"New List…" = "Nueva lista…";
+"Add to List" = "Añadir a lista";
+"Edit List" = "Editar lista";
+"Name, e.g. Work or Clients" = "Nombre, p. ej. Trabajo o Clientes";
+"%lld selected" = "%lld seleccionados";
+"Create" = "Crear";
+"No chats in this list yet" = "Aún no hay chats en esta lista";
+"Add Chats…" = "Añadir chats…";

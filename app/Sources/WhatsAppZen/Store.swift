@@ -33,6 +33,7 @@ final class AppStore: ObservableObject, Identifiable {
 
     init(id: String) {
         self.id = id
+        defer { lists = loadLists() }
         nickname = UserDefaults.standard.string(forKey: "account.\(id).name") ?? ""
         drafts = UserDefaults.standard.dictionary(forKey: "account.\(id).drafts") as? [String: String] ?? [:]
         icon = UserDefaults.standard.string(forKey: "account.\(id).icon") ?? Self.icons[0]
@@ -57,6 +58,10 @@ final class AppStore: ObservableObject, Identifiable {
     @Published var chats: [Chat] = []
     @Published var selected: String?
     @Published var messages: [Message] = []
+    /// The user's own groupings of chats ("Work", "Clients").
+    @Published var lists: [ChatList] = [] {
+        didSet { if lists != oldValue { saveLists() } }
+    }
     @Published var hasMore = false
     /// The open chat's messages have been read from the database at least once.
     @Published var loaded = false

@@ -161,19 +161,6 @@ struct RecentChatsMenu: View {
 
 // MARK: Sidebar
 
-private enum ChatFilter: String, CaseIterable {
-    case all, unread, groups, archived
-
-    var title: String {
-        switch self {
-        case .all: return L("All")
-        case .unread: return L("Unread")
-        case .groups: return L("Groups")
-        case .archived: return L("Archived")
-        }
-    }
-}
-
 struct Sidebar: View {
     @EnvironmentObject var store: AppStore
     @EnvironmentObject var model: AppModel
@@ -181,16 +168,11 @@ struct Sidebar: View {
     @State private var query = ""
     @State private var hits: [Message] = []
     @State private var filter = ChatFilter.all
+    @State private var listEditor: ListEditorTarget?
 
     private var chats: [Chat] {
         let shown = store.chats.filter { chat in
-            guard chat.archived == (filter == .archived) else { return false }
-            switch filter {
-            case .all, .archived: break
-            case .unread: if chat.unread == 0 { return false }
-            case .groups: if !chat.isGroup { return false }
-            }
-            return query.isEmpty || chat.name.localizedCaseInsensitiveContains(query)
+            filter.includes(chat, lists: store.lists) && (query.isEmpty || chat.name.localizedCaseInsensitiveContains(query))
         }
         // Pinned chats stay on top, each group still newest first.
         return shown.filter(\.pinned) + shown.filter { !$0.pinned }
@@ -231,6 +213,7 @@ struct Sidebar: View {
                                 store.pin(chat, !chat.pinned)
                             }
                         }
+                        AddToListMenu(chat: chat, editor: $listEditor)
                         Button(chat.archived ? L("Unarchive") : L("Archive"), systemImage: "archivebox") {
                             store.archive(chat, !chat.archived)
                         }
@@ -273,13 +256,11 @@ struct Sidebar: View {
             hits = await store.searchAll(query)
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            Picker(L("Filter"), selection: $filter) {
-                ForEach(ChatFilter.allCases, id: \.self) { Text($0.title) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 12)
-            .padding(.bottom, 8)
+            FilterBar(filter: $filter, editor: $listEditor)
+                .padding(.bottom, 8)
+        }
+        .sheet(item: $listEditor) { target in
+            ListEditor(target: target).environmentObject(store)
         }
         .overlay {
             if store.chats.isEmpty {
@@ -288,7 +269,14 @@ struct Sidebar: View {
                     Text(L("Syncing chats…")).foregroundStyle(.secondary).font(.callout)
                 }
             } else if chats.isEmpty && hits.isEmpty {
-                Text(L("No results")).foregroundStyle(.secondary)
+                if case .list(let id) = filter, query.isEmpty, let list = store.lists.first(where: { $0.id == id }) {
+                    VStack(spacing: 10) {
+                        Text(L("No chats in this list yet")).foregroundStyle(.secondary)
+                        Button(L("Add Chats…")) { listEditor = .edit(list) }.buttonStyle(.glass)
+                    }
+                } else {
+                    Text(L("No results")).foregroundStyle(.secondary)
+                }
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {

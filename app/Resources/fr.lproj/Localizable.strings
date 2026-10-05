@@ -353,3 +353,16 @@
 "Delete for Me" = "Supprimer pour moi";
 "Delete…" = "Supprimer…";
 "The app's folder cannot be written to." = "Le dossier de l'app n'est pas accessible en écriture.";
+"Edit List…" = "Modifier la liste…";
+"Delete List" = "Supprimer la liste";
+"Delete this list?" = "Supprimer cette liste ?";
+"The chats themselves are not deleted." = "Les discussions elles-mêmes ne sont pas supprimées.";
+"New List" = "Nouvelle liste";
+"New List…" = "Nouvelle liste…";
+"Add to List" = "Ajouter à une liste";
+"Edit List" = "Modifier la liste";
+"Name, e.g. Work or Clients" = "Nom, p. ex. Travail ou Clients";
+"%lld selected" = "%lld sélectionnée(s)";
+"Create" = "Créer";
+"No chats in this list yet" = "Aucune discussion dans cette liste";
+"Add Chats…" = "Ajouter des discussions…";

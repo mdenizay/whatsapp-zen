@@ -353,3 +353,16 @@
 "Delete for Me" = "Benden Sil";
 "Delete…" = "Sil…";
 "The app's folder cannot be written to." = "Uygulamanın klasörüne yazılamıyor.";
+"Edit List…" = "Listeyi Düzenle…";
+"Delete List" = "Listeyi Sil";
+"Delete this list?" = "Bu liste silinsin mi?";
+"The chats themselves are not deleted." = "Sohbetlerin kendisi silinmez.";
+"New List" = "Yeni Liste";
+"New List…" = "Yeni Liste…";
+"Add to List" = "Listeye Ekle";
+"Edit List" = "Listeyi Düzenle";
+"Name, e.g. Work or Clients" = "Ad, örn. İş veya Müşteriler";
+"%lld selected" = "%lld seçili";
+"Create" = "Oluştur";
+"No chats in this list yet" = "Bu listede henüz sohbet yok";
+"Add Chats…" = "Sohbet Ekle…";

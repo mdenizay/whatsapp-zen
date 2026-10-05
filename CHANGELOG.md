@@ -2,6 +2,13 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.8.0
+
+- Lists: group chats your own way, for example by work or by client. Make one with + next to the filters, pick a name, an emoji and its chats; each list shows how many of its chats are unread
+- Add a chat to a list from its right-click menu (Add to List); edit or delete a list from the list's own right-click menu
+- The filters wrap onto a second line instead of disappearing off the side, and your lists also appear in the menu bar panel
+- Lists are kept on this Mac, separately for each account
+
 ## 0.7.10
 
 - Shift-Return (or Option-Return) starts a new line in a message; Return alone still sends
