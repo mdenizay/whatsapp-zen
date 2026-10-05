@@ -973,6 +973,30 @@ struct ComposerBar: View {
                         .frame(minHeight: Self.height)
                         .focused($focused)
                         .onSubmit { if canSend { submit() } }
+                        // ⇧↩ and ⌥↩ start a new line; ↩ alone sends.
+                        .onKeyPress(.return, phases: .down) { press in
+                            guard !press.modifiers.intersection([.shift, .option]).isEmpty else { return .ignored }
+                            // Into the field editor, so the line breaks where the caret is.
+                            let windows = [NSApp.keyWindow].compactMap { $0 } + NSApp.windows
+                            guard let editor = windows.lazy.compactMap({ $0.firstResponder as? NSTextView }).first else {
+                                text += "\n"
+                                return .handled
+                            }
+                            editor.insertNewlineIgnoringFieldEditor(nil)
+                            return .handled
+                        }
+                        // Esc drops the reply or the edit being written.
+                        .onKeyPress(.escape) {
+                            if editing != nil {
+                                editing = nil
+                                text = ""
+                            } else if reply != nil {
+                                reply = nil
+                            } else {
+                                return .ignored
+                            }
+                            return .handled
+                        }
                         .onKeyPress(.upArrow) {
                             guard text.isEmpty, editing == nil, let onEditLast else { return .ignored }
                             onEditLast()

@@ -2,6 +2,11 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.7.10
+
+- Shift-Return (or Option-Return) starts a new line in a message; Return alone still sends
+- Esc drops the reply or the edit being written
+
 ## 0.7.9
 
 - Delete for Me: any message can be removed from your own devices; Delete for Everyone stays for your messages of the last two and a half days, both from "Delete…" in the message menu
