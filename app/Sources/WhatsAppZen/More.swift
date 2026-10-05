@@ -1,4 +1,6 @@
 import AppKit
+import AVFoundation
+import CoreLocation
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -347,6 +349,7 @@ struct ChatInfoSheet: View {
     let chat: Chat
     /// Opens member management for groups.
     let manageGroup: () -> Void
+    @ObservedObject private var notifier = Notifier.shared
 
     @State private var info: UserInfo?
     @State private var kind = ProcessInfo.processInfo.environment["WA_INFO"] ?? "media"
@@ -432,6 +435,24 @@ struct ChatInfoSheet: View {
                 }
             } label: {
                 InfoTile(title: L("Disappearing"), icon: "timer", active: current.ephemeral > 0)
+            }
+            .tileMenu()
+            Menu {
+                let current = notifier.chatSound(account: store.id, chat: chat.jid)
+                Button { notifier.setChatSound(nil, account: store.id, chat: chat.jid) } label: {
+                    Label(L("Default"), systemImage: current == nil ? "checkmark" : "speaker.wave.2")
+                }
+                Button { notifier.setChatSound("none", account: store.id, chat: chat.jid) } label: {
+                    Label(L("Silent"), systemImage: current == "none" ? "checkmark" : "speaker.slash")
+                }
+                Divider()
+                ForEach(Notifier.systemSounds, id: \.self) { name in
+                    Button { notifier.setChatSound(name, account: store.id, chat: chat.jid) } label: {
+                        Label(name, systemImage: current == name ? "checkmark" : "music.note")
+                    }
+                }
+            } label: {
+                InfoTile(title: L("Sound"), icon: "speaker.wave.2", active: notifier.chatSound(account: store.id, chat: chat.jid) != nil)
             }
             .tileMenu()
             Button { store.setLocked(chat.jid, !store.isLocked(chat.jid)) } label: {
@@ -922,6 +943,13 @@ struct PrivacySettings: View {
             } footer: {
                 Text(L("Single chats can be locked from their info panel. Locked chats hide their previews and need Touch ID to open."))
             }
+            Section {
+                AppPermissions()
+            } header: {
+                Text(L("Permissions"))
+            } footer: {
+                Text(L("What macOS lets this app use. Each is asked for the first time it is needed and can be changed in System Settings."))
+            }
             Section(L("Disk Encryption")) {
                 switch fileVault {
                 case true?:
@@ -1022,5 +1050,53 @@ struct StorageSettings: View {
         var total = 0
         for account in model.accounts { total += await account.cacheSize() }
         bytes = total
+    }
+}
+
+/// The macOS permissions this app can ask for, and whether it has them.
+struct AppPermissions: View {
+    @ObservedObject private var notifier = Notifier.shared
+    @State private var microphone = AVCaptureDevice.authorizationStatus(for: .audio)
+    @State private var location = CLLocationManager().authorizationStatus
+
+    var body: some View {
+        row(L("Notifications"), "bell.badge", granted: notifier.permitted, asked: notifier.system.asked, use: L("Banners for new messages")) {
+            notifier.openSystemSettings()
+        }
+        row(L("Microphone"), "mic", granted: microphone == .authorized, asked: microphone != .notDetermined, use: L("Recording voice messages")) {
+            open("Privacy_Microphone")
+        }
+        row(L("Location"), "location", granted: location == .authorizedAlways || location == .authorized,
+            asked: location != .notDetermined, use: L("Sending your location")) {
+            open("Privacy_LocationServices")
+        }
+        .onAppear(perform: refresh)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }
+    }
+
+    private func refresh() {
+        notifier.refresh()
+        microphone = AVCaptureDevice.authorizationStatus(for: .audio)
+        location = CLLocationManager().authorizationStatus
+    }
+
+    private func open(_ pane: String) {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") { NSWorkspace.shared.open(url) }
+    }
+
+    private func row(_ title: String, _ icon: String, granted: Bool, asked: Bool, use: String, change: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon).frame(width: 20).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                Text(use).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Label(granted ? L("Allowed") : (asked ? L("Not allowed") : L("Not asked yet")),
+                  systemImage: granted ? "checkmark.circle.fill" : (asked ? "xmark.circle.fill" : "questionmark.circle"))
+                .foregroundStyle(granted ? AnyShapeStyle(.green) : (asked ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary)))
+                .font(.callout)
+            Button(L("Change…"), action: change).buttonStyle(.link)
+        }
     }
 }

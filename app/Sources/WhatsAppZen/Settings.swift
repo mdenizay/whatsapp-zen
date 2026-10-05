@@ -185,6 +185,20 @@ private struct NotificationSettings: View {
                 }
             }
             Section {
+                NotificationSample(style: notifier.content, photo: notifier.photo)
+                Picker(L("Banners show"), selection: $notifier.content) {
+                    Text(L("Name and message")).tag("full")
+                    Text(L("Name only")).tag("name")
+                    Text(L("Nothing")).tag("hidden")
+                }
+                Toggle(L("Show profile photo"), isOn: $notifier.photo).disabled(notifier.content == "hidden")
+            } header: {
+                Text(L("Banner"))
+            } footer: {
+                Text(L("Locked chats, and every chat while the app is locked, always show nothing."))
+            }
+            .disabled(!notifier.enabled)
+            Section {
                 Toggle(L("Show Notifications"), isOn: $notifier.enabled)
                 Toggle(L("Play Sound"), isOn: $notifier.sound).disabled(!notifier.enabled)
                 Picker(L("Notification Sound"), selection: $notifier.soundName) {
@@ -197,7 +211,42 @@ private struct NotificationSettings: View {
                     // Let the choice be heard.
                     if !name.isEmpty { NSSound(named: name)?.play() }
                 }
-                Toggle(L("Message Preview"), isOn: $notifier.preview).disabled(!notifier.enabled)
+            }
+            if !notifier.chatSounds.isEmpty {
+                Section {
+                    ForEach(notifier.chatSounds.keys.sorted(), id: \.self) { key in
+                        HStack {
+                            Text(chatName(for: key)).lineLimit(1)
+                            Spacer()
+                            Text(notifier.chatSounds[key] == "none" ? L("Silent") : (notifier.chatSounds[key] ?? "")).foregroundStyle(.secondary)
+                            Button(L("Remove")) {
+                                let parts = key.split(separator: "/", maxSplits: 1).map(String.init)
+                                if parts.count == 2 { notifier.setChatSound(nil, account: parts[0], chat: parts[1]) }
+                            }
+                            .buttonStyle(.link)
+                        }
+                    }
+                } header: {
+                    Text(L("Chats with their own sound"))
+                } footer: {
+                    Text(L("Set a chat's sound from its info panel."))
+                }
+            }
+            Section {
+                permission(L("Notifications allowed"), notifier.permitted)
+                row(L("Style"), notifier.system.style == "alerts" ? L("Alerts") : notifier.system.style == "banners" ? L("Banners") : L("None"),
+                    ok: notifier.system.style != "none")
+                permission(L("Sound"), notifier.system.sound)
+                permission(L("Notification Centre"), notifier.system.center)
+                permission(L("Lock Screen"), notifier.system.lockScreen)
+                permission(L("Badges"), notifier.system.badge)
+                row(L("Previews"), notifier.system.previews == "never" ? L("Never") : notifier.system.previews == "unlocked" ? L("When unlocked") : L("Always"),
+                    ok: notifier.system.previews != "never")
+                Button(L("Change in System Settings…")) { notifier.openSystemSettings() }
+            } header: {
+                Text(L("What macOS allows"))
+            } footer: {
+                Text(L("These are set in System Settings and limit everything above."))
             }
             Section(L("Do Not Disturb")) {
                 if prefs.paused {
@@ -225,6 +274,54 @@ private struct NotificationSettings: View {
         }
         .formStyle(.grouped)
         .onAppear { notifier.refresh() }
+        // Back from System Settings: show what was changed there.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in notifier.refresh() }
+    }
+
+    private func permission(_ title: String, _ on: Bool) -> some View {
+        row(title, on ? L("On") : L("Off"), ok: on)
+    }
+
+    private func row(_ title: String, _ value: String, ok: Bool) -> some View {
+        HStack {
+            Image(systemName: ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .foregroundStyle(ok ? AnyShapeStyle(.green) : AnyShapeStyle(.orange))
+            Text(title)
+            Spacer()
+            Text(value).foregroundStyle(.secondary)
+        }
+    }
+
+    /// The chat behind an "account/jid" key, by name where it is known.
+    private func chatName(for key: String) -> String {
+        let parts = key.split(separator: "/", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return key }
+        let chat = AppModel.shared.accounts.first { $0.id == parts[0] }?.chats.first { $0.jid == parts[1] }
+        return chat?.name ?? parts[1]
+    }
+}
+
+/// A small picture of a banner with the chosen options.
+private struct NotificationSample: View {
+    let style: String
+    let photo: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 34, height: 34)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(style == "hidden" ? "WhatsApp" : "Emma Wilson").font(.callout.weight(.semibold))
+                Text(style == "full" ? L("Does 8 pm work for you?") : L("New message")).font(.callout).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if photo, style != "hidden" {
+                Circle().fill(LinearGradient(colors: [.purple.opacity(0.5), .purple.opacity(0.25)], startPoint: .top, endPoint: .bottom))
+                    .frame(width: 32, height: 32)
+                    .overlay(Text("EW").font(.caption.weight(.semibold)).foregroundStyle(.purple))
+            }
+        }
+        .padding(10)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 

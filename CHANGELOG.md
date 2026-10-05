@@ -2,6 +2,13 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.9.2
+
+- Notifications: choose what a banner shows (name and message, name only, or nothing) and whether it carries the profile photo, with a preview of the result
+- A sound of its own for a chat, or silence, from the Sound button in the chat's info panel; Settings › Notifications lists the chats that have one
+- Settings › Notifications shows what macOS currently allows this app's notifications to do: banners or alerts, sound, Notification Centre, Lock Screen, badges and previews
+- Settings › Privacy lists the app's permissions (notifications, microphone, location) and whether each is granted
+
 ## 0.9.1
 
 - Lower memory use. The chat list now builds rows only for the chats near the ones on screen instead of all of them; map previews are saved and shown as pictures instead of loading the map engine each time; the menu bar icon is a small bitmap; the image cache is half the size; the database and the protocol core are held to tighter limits; and with the window closed the open chat's messages are let go until it is shown again

@@ -7,6 +7,44 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     /// Whether macOS lets this app post notifications at all.
     @Published private(set) var permitted = true
+
+    /// What macOS currently allows this app's notifications to do. These are
+    /// the user's choices in System Settings; the app can only read them.
+    struct SystemState: Equatable {
+        var asked = false
+        /// "banners", "alerts" or "none".
+        var style = "banners"
+        var sound = true
+        var center = true
+        var lockScreen = true
+        var badge = true
+        /// "always", "unlocked" or "never".
+        var previews = "always"
+    }
+
+    @Published private(set) var system = SystemState()
+
+    /// What a banner gives away: "full" (name and message), "name" (who, not
+    /// what) or "hidden" (neither).
+    @Published var content = UserDefaults.standard.string(forKey: "notifyContent")
+        ?? ((UserDefaults.standard.object(forKey: "notifyPreview") as? Bool ?? true) ? "full" : "name") {
+        didSet { UserDefaults.standard.set(content, forKey: "notifyContent") }
+    }
+    /// Whether banners carry the sender's profile photo.
+    @Published var photo = UserDefaults.standard.object(forKey: "notifyPhoto") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(photo, forKey: "notifyPhoto") }
+    }
+    /// Chats with a sound of their own, keyed "account/jid": a system sound's
+    /// name, or "none" for silence.
+    @Published private(set) var chatSounds = UserDefaults.standard.dictionary(forKey: "notifyChatSounds") as? [String: String] ?? [:]
+
+    func chatSound(account: String, chat: String) -> String? { chatSounds["\(account)/\(chat)"] }
+
+    func setChatSound(_ name: String?, account: String, chat: String) {
+        chatSounds["\(account)/\(chat)"] = name
+        UserDefaults.standard.set(chatSounds, forKey: "notifyChatSounds")
+        if let name, name != "none" { NSSound(named: name)?.play() }
+    }
     @Published var enabled = UserDefaults.standard.object(forKey: "notify") as? Bool ?? true {
         didSet { UserDefaults.standard.set(enabled, forKey: "notify") }
     }
@@ -24,18 +62,21 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     /// Sets the sound on a notification. A chosen system sound is played by
     /// the app itself, which is running whenever it posts a notification.
-    private func applySound(to content: UNMutableNotificationContent) {
+    private func applySound(to content: UNMutableNotificationContent, custom: String? = nil) {
         guard sound else { return }
-        if soundName.isEmpty {
+        let name = custom ?? soundName
+        if name == "none" { return }
+        if name.isEmpty {
             content.sound = .default
         } else {
-            NSSound(named: soundName)?.play()
+            NSSound(named: name)?.play()
         }
     }
 
-    /// Hide message text in banners (shows L("New message") instead).
-    @Published var preview = UserDefaults.standard.object(forKey: "notifyPreview") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(preview, forKey: "notifyPreview") }
+    /// Whether banners show the message text; the simple form of `content`.
+    var preview: Bool {
+        get { content == "full" }
+        set { content = newValue ? "full" : "name" }
     }
 
     /// Opens a chat in the main window; set by the app delegate.
@@ -65,7 +106,20 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
         guard available else { return }
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             let ok = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
-            DispatchQueue.main.async { self.permitted = ok }
+            var state = SystemState()
+            state.asked = settings.authorizationStatus != .notDetermined
+            state.style = settings.alertSetting != .enabled || settings.alertStyle == .none ? "none"
+                : (settings.alertStyle == .alert ? "alerts" : "banners")
+            state.sound = settings.soundSetting == .enabled
+            state.center = settings.notificationCenterSetting == .enabled
+            state.lockScreen = settings.lockScreenSetting == .enabled
+            state.badge = settings.badgeSetting == .enabled
+            state.previews = settings.showPreviewsSetting == .never ? "never"
+                : (settings.showPreviewsSetting == .whenAuthenticated ? "unlocked" : "always")
+            DispatchQueue.main.async {
+                self.permitted = ok
+                self.system = state
+            }
         }
     }
 
@@ -79,15 +133,16 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
     func post(account: AppStore, chat: String, chatName: String, message: Message) {
         guard available, enabled, !Prefs.shared.paused else { return }
         // A locked chat, or a locked app, gives nothing away in its banner.
-        let hidden = account.isLocked(chat) || AppModel.shared.locked
+        let style = account.isLocked(chat) || AppModel.shared.locked ? "hidden" : self.content
         let content = UNMutableNotificationContent()
-        content.title = chatName
+        content.title = style == "hidden" ? "WhatsApp" : chatName
         var subtitle: [String] = []
-        if chat.hasSuffix("@g.us") { subtitle.append(message.senderName) }
+        if chat.hasSuffix("@g.us"), style != "hidden" { subtitle.append(message.senderName) }
         if AppModel.shared.accounts.count > 1 { subtitle.append(account.label) }
         content.subtitle = subtitle.joined(separator: " · ")
-        content.body = preview && !hidden ? message.plainText : L("New message")
-        applySound(to: content)
+        content.body = style == "full" ? message.plainText : L("New message")
+        applySound(to: content, custom: chatSound(account: account.id, chat: chat))
+        let withPhoto = photo && style != "hidden"
         content.categoryIdentifier = "message"
         content.threadIdentifier = "\(account.id)/\(chat)"
         content.userInfo = ["chat": chat, "account": account.id]
@@ -96,7 +151,7 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
         Task {
             // The sender's photo, shown on the banner. The system moves the
             // attached file away, so hand it a copy.
-            if let path: String = try? await Core.call("avatar", ["jid": chat], account: accountID), !path.isEmpty {
+            if withPhoto, let path: String = try? await Core.call("avatar", ["jid": chat], account: accountID), !path.isEmpty {
                 let copy = FileManager.default.temporaryDirectory.appendingPathComponent("wa-avatar-\(UUID().uuidString).jpg")
                 if (try? FileManager.default.copyItem(atPath: path, toPath: copy.path)) != nil,
                    let attachment = try? UNNotificationAttachment(identifier: "avatar", url: copy) {
@@ -170,6 +225,8 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                 withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void) {
-        done(sound && soundName.isEmpty ? [.banner, .sound, .list] : [.banner, .list])
+        // A notification without a sound of its own (a custom one is played by
+        // the app, a silenced chat has none) stays quiet either way.
+        done(sound ? [.banner, .sound, .list] : [.banner, .list])
     }
 }

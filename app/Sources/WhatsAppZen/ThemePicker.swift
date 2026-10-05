@@ -283,7 +283,7 @@ struct SetupWizard: View {
         VStack(alignment: .leading, spacing: 12) {
             Toggle(L("Show Notifications"), isOn: $notifier.enabled)
             Toggle(L("Play Sound"), isOn: $notifier.sound).disabled(!notifier.enabled)
-            Toggle(L("Message Preview"), isOn: $notifier.preview).disabled(!notifier.enabled)
+            Toggle(L("Message Preview"), isOn: Binding(get: { notifier.preview }, set: { notifier.preview = $0 })).disabled(!notifier.enabled)
             Toggle(L("Show unread count in the menu bar"), isOn: $prefs.menuBarCount)
             if let store = model.active {
                 Toggle(L("Open at Login"), isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
