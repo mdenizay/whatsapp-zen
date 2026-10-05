@@ -59,7 +59,7 @@ func newApp(id, dir string) (*App, error) {
 		WHERE media_path != '' AND instr(media_path, '/media/') > 0 AND media_path NOT LIKE ? || '%'`, dir, dir)
 	log := newFileLog(filepath.Join(dir, "core.log"))
 	storeDB, err := sql.Open("sqlite3",
-		"file:"+filepath.Join(dir, "store.db")+"?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000&_cache_size=-1024")
+		"file:"+filepath.Join(dir, "store.db")+"?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000&_cache_size=-512")
 	if err != nil {
 		return nil, err
 	}

@@ -306,6 +306,16 @@ final class AppStore: ObservableObject, Identifiable {
         Core.fire("fetch_history", ["chat": chat], account: id)
     }
 
+    /// Lets go of the open chat's messages while no window shows them. The
+    /// chat stays selected; `reloadMessages` brings them back.
+    func releaseMessages() {
+        guard !messages.isEmpty else { return }
+        messages = []
+        pinnedMessages = []
+        lastMessagesKey = ""
+        lastMessages = Data()
+    }
+
     func loadOlder(then done: @escaping () -> Void) {
         guard let chat = selected, let first = messages.first else { return }
         Task { @MainActor in

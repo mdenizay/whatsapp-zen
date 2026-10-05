@@ -78,6 +78,9 @@ func openDB(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	leanPool(db)
+	// One ceiling for everything SQLite allocates in this process (both
+	// databases, every connection): it frees cache before growing past it.
+	db.Exec(`PRAGMA soft_heap_limit=12000000`)
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err
 	}

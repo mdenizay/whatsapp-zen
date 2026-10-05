@@ -87,6 +87,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in malloc_zone_pressure_relief(nil, 0) }
         showWindow()
         snapshotIfRequested()
+        // WA_OPEN=<n> (demo) starts inside the nth chat, for measuring a running app.
+        if AppStore.isDemo, ProcessInfo.processInfo.environment["WA_OPEN"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in model.active?.open(model.active?.chats.dropFirst(Int(ProcessInfo.processInfo.environment["WA_OPEN"] ?? "") ?? 0).first?.jid) }
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -144,6 +148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if mainContentReleased {
             window.contentView = makeMainContent()
             mainContentReleased = false
+            model.accounts.forEach { $0.reloadMessages() }
         }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -159,6 +164,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard !window.isVisible else { return }
             window.contentView = NSView()
             mainContentReleased = true
+            // Nothing shows the open chat's messages now; they are read again
+            // when the window comes back.
+            model.accounts.forEach { $0.releaseMessages() }
+            malloc_zone_pressure_relief(nil, 0)
         }
     }
     func windowDidMiniaturize(_ notification: Notification) { model.windowVisible = false }
@@ -218,22 +227,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// The WhatsApp glyph as a template image, so it follows the menu bar's
     /// light/dark appearance like the system's own items.
     private static func statusIcon(unread: Bool = false) -> NSImage? {
+        unread ? statusIcons.unread : statusIcons.plain
+    }
+
+    /// Both states of the icon, drawn once into small bitmaps. Keeping the
+    /// SVG itself as the image held its whole parsed document in memory.
+    private static let statusIcons: (plain: NSImage?, unread: NSImage?) = {
         guard let url = Bundle.main.url(forResource: "whatsapp", withExtension: "svg"), let glyph = NSImage(contentsOf: url) else {
-            return NSImage(systemSymbolName: "message.fill", accessibilityDescription: "WhatsApp")
+            let symbol = NSImage(systemSymbolName: "message.fill", accessibilityDescription: "WhatsApp")
+            return (symbol, symbol)
         }
         let size = NSSize(width: 17, height: 17)
-        glyph.size = size
-        guard unread else {
-            glyph.isTemplate = true
-            return glyph
-        }
-        return NSImage(size: size, flipped: false) { rect in
+        func bitmap(tint: NSColor?) -> NSImage? {
+            // 3× covers every display the menu bar can be on.
+            guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 51, pixelsHigh: 51, bitsPerSample: 8, samplesPerPixel: 4,
+                                             hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+                  let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
+            rep.size = size
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = context
+            let rect = NSRect(origin: .zero, size: size)
             glyph.draw(in: rect)
-            NSColor(srgbRed: 0.15, green: 0.83, blue: 0.40, alpha: 1).set()
-            rect.fill(using: .sourceAtop)
-            return true
+            if let tint {
+                tint.set()
+                rect.fill(using: .sourceAtop)
+            }
+            NSGraphicsContext.restoreGraphicsState()
+            let image = NSImage(size: size)
+            image.addRepresentation(rep)
+            image.isTemplate = tint == nil
+            return image
         }
-    }
+        return (bitmap(tint: nil), bitmap(tint: NSColor(srgbRed: 0.15, green: 0.83, blue: 0.40, alpha: 1)))
+    }()
 
     /// The menu bar shows no count; the icon turns green while something is unread.
     private func showUnread(_ unread: Int) {

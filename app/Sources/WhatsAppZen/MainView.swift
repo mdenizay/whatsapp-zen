@@ -215,6 +215,9 @@ struct Sidebar: View {
     @State private var filter = ChatFilter.all
     @State private var listEditor: ListEditorTarget?
     @ObservedObject private var prefs = Prefs.shared
+    /// How many chats the list currently holds rows for.
+    @State private var shown = Sidebar.page
+    private static let page = 60
 
     private var chats: [Chat] {
         let shown = store.chats.filter { chat in
@@ -226,7 +229,11 @@ struct Sidebar: View {
 
     var body: some View {
         List(selection: Binding(get: { store.selected }, set: { store.openChecked($0) })) {
-            ForEach(chats) { chat in
+            // A row and its menu are built for every chat handed to the list,
+            // on screen or not; with hundreds of chats that was most of the
+            // window's memory. So the list is handed a screenful or two and
+            // more as it is scrolled.
+            ForEach(chats.prefix(shown)) { chat in
                 ChatRow(chat: chat, typing: store.typing[chat.jid] != nil, tick: store.avatarTick,
                         draft: chat.jid == store.selected ? nil : store.drafts[chat.jid], sealed: store.isSealed(chat.jid))
                     .equatable()
@@ -268,6 +275,10 @@ struct Sidebar: View {
                         }
                     }
             }
+            if chats.count > shown {
+                Color.clear.frame(height: 1)
+                    .onAppear { shown += Self.page }
+            }
             if !hits.isEmpty {
                 Section(L("Messages")) {
                     ForEach(hits) { hit in
@@ -296,6 +307,9 @@ struct Sidebar: View {
             if prefs.themeSidebar >= 0 { Color(hex: prefs.themeSidebar).opacity(prefs.windowOpacity).ignoresSafeArea() }
         }
         .searchable(text: $query, placement: .sidebar, prompt: L("Search"))
+        // A different set of chats starts from the top again.
+        .onChange(of: filter) { _, _ in shown = Self.page }
+        .onChange(of: query) { _, _ in shown = Self.page }
         .task(id: query) {
             // Search message text too, once typing pauses.
             guard query.count >= 2 else {

@@ -72,7 +72,9 @@ struct LocationCard: View {
     }
 }
 
-/// Small static maps, drawn once per place and kept in memory.
+/// Small static maps, drawn once per place and kept on disk. Drawing one
+/// loads MapKit, which costs some 20 MB for as long as the app runs; a map
+/// that was drawn before is just a picture read from its file.
 enum MapSnapshots {
     private static let cache: NSCache<NSString, NSImage> = {
         let c = NSCache<NSString, NSImage>()
@@ -80,15 +82,33 @@ enum MapSnapshots {
         return c
     }()
 
-    static func image(for place: LocationCard.Place, size: CGSize) async -> NSImage? {
-        let key = "\(place.latitude),\(place.longitude)" as NSString
+    private static let folder: URL = {
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let dir = base.appendingPathComponent("com.mdenizay.whatsapp/maps", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }()
+
+    @MainActor static func image(for place: LocationCard.Place, size: CGSize) async -> NSImage? {
+        // Maps are drawn for light or dark, so each look has its own picture.
+        let dark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let name = String(format: "%.5f_%.5f_%@.png", place.latitude, place.longitude, dark ? "dark" : "light")
+        let key = name as NSString
         if let hit = cache.object(forKey: key) { return hit }
+        let file = folder.appendingPathComponent(name)
+        if let saved = NSImage(contentsOf: file) {
+            cache.setObject(saved, forKey: key)
+            return saved
+        }
         let options = MKMapSnapshotter.Options()
         options.region = MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: place.latitude, longitude: place.longitude),
                                             latitudinalMeters: 900, longitudinalMeters: 900)
         options.size = size
         guard let snapshot = try? await MKMapSnapshotter(options: options).start() else { return nil }
         cache.setObject(snapshot.image, forKey: key)
+        if let tiff = snapshot.image.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+            try? png.write(to: file)
+        }
         return snapshot.image
     }
 }

@@ -26,7 +26,13 @@ enum Demo {
         chat("120363000000000002", "Sunday Football", group: true, ago: 90000, text: "Who's in for Saturday?", sender: "Ben"),
         chat("900000000004", "Olivia Brown", ago: 180_000, type: "audio", text: "", fromMe: true, status: 2),
         chat("900000000005", "Noah Miller", ago: 400_000, text: "See you then", fromMe: true, status: 1),
-    ]
+    ] + many
+
+    /// WA_MANY=<n> adds that many more chats, for measuring a long chat list.
+    private static let many: [Chat] = (0..<(Int(ProcessInfo.processInfo.environment["WA_MANY"] ?? "") ?? 0)).map {
+        chat("9001\(String(format: "%08d", $0))", "Contact \($0 + 1)", group: $0 % 5 == 0, ago: 500_000 + $0 * 3600,
+             text: "Message number \($0 + 1) in a long list of chats")
+    }
 
     static let presence: [String: Presence] = [
         "900000000001@s.whatsapp.net": Presence(online: true, lastSeen: 0),
