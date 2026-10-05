@@ -369,3 +369,7 @@
 "Hide These Chats from All" = "Bu Sohbetleri Tümü'nde Gizle";
 "Hide these chats from All" = "Bu sohbetleri Tümü'nde gizle";
 "They are shown only under this list. Unread still shows them." = "Yalnızca bu listede görünürler. Okunmamış'ta yine çıkarlar.";
+"View" = "Görünüm";
+"Compact Mode" = "Kompakt Mod";
+"Compact mode" = "Kompakt mod";
+"Smaller rows and tighter messages, to see more at once. ⌥⌘C switches it from anywhere." = "Daha küçük satırlar ve sık mesajlarla bir bakışta daha fazlasını görün. ⌥⌘C her yerden açıp kapatır.";

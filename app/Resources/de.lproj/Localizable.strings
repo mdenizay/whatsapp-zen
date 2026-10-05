@@ -369,3 +369,7 @@
 "Hide These Chats from All" = "Diese Chats unter Alle ausblenden";
 "Hide these chats from All" = "Diese Chats unter Alle ausblenden";
 "They are shown only under this list. Unread still shows them." = "Sie erscheinen nur in dieser Liste. Unter Ungelesen bleiben sie sichtbar.";
+"View" = "Darstellung";
+"Compact Mode" = "Kompakter Modus";
+"Compact mode" = "Kompakter Modus";
+"Smaller rows and tighter messages, to see more at once. ⌥⌘C switches it from anywhere." = "Kleinere Zeilen und dichtere Nachrichten, um mehr auf einmal zu sehen. ⌥⌘C schaltet es überall um.";

@@ -2,6 +2,10 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.8.3
+
+- Compact mode for the whole app: smaller chat rows, tighter message bubbles and spacing, and a denser menu bar panel. Switch it in Settings › Appearance, from View › Compact Mode, or with ⌥⌘C
+
 ## 0.8.2
 
 - Long messages can be scrolled while you write them: the field grows to eight lines, then scrolls with the mouse or trackpad

@@ -90,11 +90,12 @@ struct MenuChatRow: View {
     let open: () -> Void
 
     @State private var hovering = false
+    @ObservedObject private var prefs = Prefs.shared
 
     var body: some View {
         Button(action: open) {
             HStack(spacing: 10) {
-                AvatarView(jid: chat.jid, name: chat.name, size: 38, tick: tick)
+                AvatarView(jid: chat.jid, name: chat.name, size: prefs.compact ? 28 : 38, tick: tick)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(chat.name).fontWeight(chat.unread > 0 ? .semibold : .medium).lineLimit(1)
@@ -120,7 +121,7 @@ struct MenuChatRow: View {
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 7)
+            .padding(.vertical, prefs.compact ? 3 : 7)
             .background(hovering ? AnyShapeStyle(.primary.opacity(0.07)) : AnyShapeStyle(.clear),
                         in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .contentShape(Rectangle())

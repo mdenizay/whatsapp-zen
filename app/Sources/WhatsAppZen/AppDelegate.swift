@@ -433,6 +433,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         win.addItem(.separator())
         win.addItem(withTitle: "WhatsApp", action: #selector(AppDelegate.showMainWindow), keyEquivalent: "0")
 
+        let view = NSMenu(title: L("View"))
+        let compact = view.addItem(withTitle: L("Compact Mode"), action: #selector(AppDelegate.toggleCompact), keyEquivalent: "c")
+        compact.keyEquivalentModifierMask = [.command, .option]
+
         let go = NSMenu(title: L("Go"))
         go.addItem(withTitle: L("Jump to a chat"), action: #selector(AppDelegate.showSwitcher), keyEquivalent: "k")
         go.addItem(withTitle: L("New Chat"), action: #selector(AppDelegate.showNewChat), keyEquivalent: "n")
@@ -448,7 +452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             item.tag = number - 1
         }
 
-        for menu in [app, edit, go, win] {
+        for menu in [app, edit, view, go, win] {
             let item = NSMenuItem()
             item.submenu = menu
             main.addItem(item)
@@ -458,6 +462,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc func showMainWindow() { showWindow() }
+
+    @objc func toggleCompact() { Prefs.shared.compact.toggle() }
+
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(toggleCompact) { item.state = Prefs.shared.compact ? .on : .off }
+        return true
+    }
 
     /// Opens a chat in a window of its own, next to the main one.
     func openChatWindow(_ chat: Chat, in store: AppStore) {

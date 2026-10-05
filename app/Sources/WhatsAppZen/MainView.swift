@@ -316,9 +316,9 @@ struct ChatRow: View {
     @ObservedObject private var prefs = Prefs.shared
 
     var body: some View {
-        HStack(spacing: 11) {
-            AvatarView(jid: chat.jid, name: chat.name, size: prefs.compact ? 32 : 44, tick: tick)
-            VStack(alignment: .leading, spacing: 3) {
+        HStack(spacing: prefs.compact ? 9 : 11) {
+            AvatarView(jid: chat.jid, name: chat.name, size: prefs.compact ? 30 : 44, tick: tick)
+            VStack(alignment: .leading, spacing: prefs.compact ? 1 : 3) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(chat.name).font(.body.weight(chat.unread > 0 ? .semibold : .medium)).lineLimit(1)
                     Spacer(minLength: 4)

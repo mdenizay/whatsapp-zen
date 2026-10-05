@@ -73,8 +73,8 @@ struct MessageRow: View {
                 Spacer(minLength: 36)
             }
         }
-        .padding(.top, showSender ? 6 : 0)
-        .padding(.bottom, endsGroup ? 6 : 0)
+        .padding(.top, showSender ? (prefs.compact ? 3 : 6) : 0)
+        .padding(.bottom, endsGroup ? (prefs.compact ? 3 : 6) : 0)
         .background(highlighted ? Theme.accent.opacity(0.16) : .clear, in: RoundedRectangle(cornerRadius: 12))
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
@@ -99,7 +99,7 @@ struct MessageRow: View {
     }
 
     private var bubble: some View {
-        BubbleStack(spacing: 5) {
+        BubbleStack(spacing: prefs.compact ? 3 : 5) {
             if showSender {
                 Text(message.senderName)
                     .font(.caption.weight(.semibold))
@@ -118,8 +118,8 @@ struct MessageRow: View {
                 content
             }
         }
-        .padding(.horizontal, bare ? 3 : 11)
-        .padding(.vertical, bare ? 3 : 7)
+        .padding(.horizontal, bare ? 3 : (prefs.compact ? 9 : 11))
+        .padding(.vertical, bare ? 3 : (prefs.compact ? 4 : 7))
         .foregroundStyle(mine ? .white : .primary)
         .tint(mine ? .white : Theme.accent)
         .background(mine ? Theme.bubbleOut : Theme.bubbleIn, in: shape)
@@ -644,6 +644,7 @@ struct MessageList: View {
 
 struct DayDivider: View {
     let date: Date
+    @ObservedObject private var prefs = Prefs.shared
 
     var body: some View {
         Text(Format.day(date))
@@ -652,7 +653,7 @@ struct DayDivider: View {
             .padding(.horizontal, 11)
             .padding(.vertical, 4)
             .glassEffect(.regular, in: Capsule())
-            .padding(.vertical, 8)
+            .padding(.vertical, prefs.compact ? 4 : 8)
     }
 }
 

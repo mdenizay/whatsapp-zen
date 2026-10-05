@@ -783,6 +783,15 @@ struct AppearanceSettings: View {
                 ThemePicker().padding(.vertical, 4)
             }
             Section {
+                Toggle(isOn: $prefs.compact) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("Compact mode"))
+                        Text(L("Smaller rows and tighter messages, to see more at once. ⌥⌘C switches it from anywhere."))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Section {
                 Picker(L("Background"), selection: $prefs.wallpaper) {
                     Text(L("Theme")).tag("theme")
                     Text(L("Plain")).tag("none")
@@ -852,7 +861,6 @@ struct ChatSettings: View {
                 }
             }
             Section(L("Chat List")) {
-                Toggle(L("Compact chat list"), isOn: $prefs.compact)
                 Picker(L("Preview lines"), selection: $prefs.previewLines) {
                     Text("1").tag(1)
                     Text("2").tag(2)

@@ -369,3 +369,7 @@
 "Hide These Chats from All" = "Скрыть эти чаты из «Все»";
 "Hide these chats from All" = "Скрыть эти чаты из «Все»";
 "They are shown only under this list. Unread still shows them." = "Они видны только в этом списке. В «Непрочитанных» они остаются.";
+"View" = "Вид";
+"Compact Mode" = "Компактный режим";
+"Compact mode" = "Компактный режим";
+"Smaller rows and tighter messages, to see more at once. ⌥⌘C switches it from anywhere." = "Строки меньше, сообщения плотнее — видно больше сразу. ⌥⌘C переключает режим откуда угодно.";
