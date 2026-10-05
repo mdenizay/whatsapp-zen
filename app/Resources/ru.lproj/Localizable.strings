@@ -349,3 +349,7 @@
 "Asking your phone…" = "Запрос к телефону…";
 "No messages on this Mac yet" = "На этом Mac пока нет сообщений";
 "Messages from before this Mac was linked stay on your phone. New ones will show up here." = "Сообщения, отправленные до привязки этого Mac, остаются на телефоне. Новые появятся здесь.";
+"Delete this message?" = "Удалить это сообщение?";
+"Delete for Me" = "Удалить у меня";
+"Delete…" = "Удалить…";
+"The app's folder cannot be written to." = "Нет доступа на запись к папке приложения.";

@@ -44,6 +44,10 @@ struct MessageRow: View {
     @State private var stickerMenu = false
 
     private var mine: Bool { message.fromMe }
+    /// WhatsApp takes a message back from everyone for about two and a half days.
+    private var canDeleteForEveryone: Bool {
+        mine && !message.deleted && Date().timeIntervalSince(message.date) < 60 * 3600
+    }
     private var secondary: Color { mine ? .white.opacity(0.78) : .secondary }
     /// A bare photo: the picture fills the bubble and the time sits on it.
     private var bare: Bool {
@@ -78,8 +82,11 @@ struct MessageRow: View {
         }
         .onHover { hovering = $0 }
         .contextMenu { menu }
-        .confirmationDialog(L("Delete this message for everyone?"), isPresented: $confirmDelete) {
-            Button(L("Delete for Everyone"), role: .destructive) { store.revoke(message) }
+        .confirmationDialog(L("Delete this message?"), isPresented: $confirmDelete) {
+            if canDeleteForEveryone {
+                Button(L("Delete for Everyone"), role: .destructive) { store.revoke(message) }
+            }
+            Button(L("Delete for Me"), role: .destructive) { store.deleteForMe(message) }
         }
     }
 
@@ -273,13 +280,11 @@ struct MessageRow: View {
             Button(message.pinned ? L("Unpin") : L("Pin"), systemImage: message.pinned ? "pin.slash" : "pin") {
                 store.pin(message, !message.pinned)
             }
-            if mine {
-                Divider()
-                if canEdit {
-                    Button(L("Edit"), systemImage: "pencil") { actions.edit?(message) }
-                }
-                Button(L("Delete for Everyone"), systemImage: "trash", role: .destructive) { confirmDelete = true }
+            Divider()
+            if mine, canEdit {
+                Button(L("Edit"), systemImage: "pencil") { actions.edit?(message) }
             }
+            Button(L("Delete…"), systemImage: "trash", role: .destructive) { confirmDelete = true }
         }
     }
 

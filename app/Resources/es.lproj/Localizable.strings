@@ -349,3 +349,7 @@
 "Asking your phone…" = "Consultando el teléfono…";
 "No messages on this Mac yet" = "Aún no hay mensajes en este Mac";
 "Messages from before this Mac was linked stay on your phone. New ones will show up here." = "Los mensajes anteriores a la vinculación de este Mac permanecen en tu teléfono. Los nuevos aparecerán aquí.";
+"Delete this message?" = "¿Eliminar este mensaje?";
+"Delete for Me" = "Eliminar para mí";
+"Delete…" = "Eliminar…";
+"The app's folder cannot be written to." = "No se puede escribir en la carpeta de la app.";

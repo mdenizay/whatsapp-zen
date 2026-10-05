@@ -88,6 +88,8 @@ func (a *App) dispatch(r *Req) (any, error) {
 		return a.queryMessages(`chat=? AND pinned=1 AND deleted=0 ORDER BY ts DESC LIMIT 20`, r.Chat)
 	case "search":
 		return a.search(r.Chat, r.Text)
+	case "delete_for_me":
+		return nil, a.deleteForMe(r.Chat, r.ID)
 	case "fetch_history":
 		return a.fetchHistory(r.Chat)
 	case "count_since":

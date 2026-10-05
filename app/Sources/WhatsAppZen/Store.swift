@@ -436,6 +436,10 @@ final class AppStore: ObservableObject, Identifiable {
         }
     }
 
+    func deleteForMe(_ message: Message) {
+        attempt { try await Core.run("delete_for_me", ["chat": message.chat, "id": message.id], account: self.id) }
+    }
+
     func revoke(_ message: Message) {
         attempt { try await Core.run("revoke", ["chat": message.chat, "id": message.id], account: self.id) }
     }

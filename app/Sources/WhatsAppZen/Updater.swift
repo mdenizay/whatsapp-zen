@@ -140,29 +140,42 @@ final class Updater: ObservableObject {
     }
 
     /// Replaces the running app with the downloaded one and starts it again.
+    ///
+    /// The swap happens in a small helper once this process has exited: an app
+    /// whose bundle is moved away while it still runs can no longer load its
+    /// own resources on the way out, and if quitting was held up (by an open
+    /// sheet, say) it went on running from a deleted bundle.
     func installAndRelaunch() {
         guard let staged else { return }
         let current = Bundle.main.bundleURL
-        let old = current.deletingLastPathComponent().appendingPathComponent(".\(current.lastPathComponent).old-\(getpid())")
-        let fm = FileManager.default
+        let folder = current.deletingLastPathComponent()
+        guard FileManager.default.isWritableFile(atPath: folder.path) else {
+            state = .failed(L("The app's folder cannot be written to."))
+            return
+        }
+        let old = folder.appendingPathComponent(".\(current.lastPathComponent).old-\(getpid())")
+        let script = """
+            while kill -0 "$1" 2>/dev/null; do sleep 0.2; done
+            if mv "$2" "$4"; then
+              if mv "$3" "$2"; then rm -rf "$4"; else mv "$4" "$2"; fi
+            fi
+            /usr/bin/open "$2"
+            """
+        let helper = Process()
+        helper.executableURL = URL(fileURLWithPath: "/bin/sh")
+        helper.arguments = ["-c", script, "sh", "\(getpid())", current.path, staged.path, old.path]
         do {
-            try fm.moveItem(at: current, to: old)
-            do {
-                try fm.moveItem(at: staged, to: current)
-            } catch {
-                try? fm.moveItem(at: old, to: current)
-                throw error
-            }
-            try? fm.removeItem(at: old)
+            try helper.run()
         } catch {
             state = .failed(error.localizedDescription)
             return
         }
-        // Open the new copy once this process is gone.
-        let relaunch = Process()
-        relaunch.executableURL = URL(fileURLWithPath: "/bin/sh")
-        relaunch.arguments = ["-c", "while kill -0 \(getpid()) 2>/dev/null; do sleep 0.2; done; /usr/bin/open \"$0\"", current.path]
-        try? relaunch.run()
+        // Nothing open may hold up quitting.
+        for window in NSApp.windows {
+            if let sheet = window.attachedSheet { window.endSheet(sheet) }
+        }
         NSApp.terminate(nil)
+        // Should quitting still be refused, leave anyway; the helper is waiting.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { exit(0) }
     }
 }

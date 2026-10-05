@@ -12,6 +12,7 @@ import (
 	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waSyncAction"
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
 )
@@ -327,4 +328,56 @@ func (a *App) groupLink(chat string) (string, error) {
 		return "", err
 	}
 	return cli.GetGroupInviteLink(bg, jid, false)
+}
+
+// deleteForMe removes a message from this chat on every one of the user's own
+// devices; the other side keeps it.
+func (a *App) deleteForMe(chat, id string) error {
+	cli, jid, err := a.target(chat)
+	if err != nil {
+		return err
+	}
+	sender, fromMe, _, err := a.messageKey(jid, id)
+	if err != nil {
+		return err
+	}
+	var ts int64
+	a.db.QueryRow(`SELECT ts FROM messages WHERE chat=? AND id=?`, chat, id).Scan(&ts)
+	isFromMe, senderJID := "0", "0"
+	if fromMe {
+		isFromMe = "1"
+	} else if jid.Server == types.GroupServer {
+		senderJID = sender.String()
+	}
+	patch := appstate.PatchInfo{
+		Type: appstate.WAPatchRegularHigh,
+		Mutations: []appstate.MutationInfo{{
+			Index:   []string{appstate.IndexDeleteMessageForMe, jid.String(), id, isFromMe, senderJID},
+			Version: 3,
+			Value: &waSyncAction.SyncActionValue{
+				DeleteMessageForMeAction: &waSyncAction.DeleteMessageForMeAction{
+					DeleteMedia:      proto.Bool(true),
+					MessageTimestamp: proto.Int64(ts),
+				},
+			},
+		}},
+	}
+	if err := cli.SendAppState(bg, patch); err != nil {
+		return err
+	}
+	a.removeMessage(chat, id)
+	return nil
+}
+
+// removeMessage drops a message, its reactions and its saved media.
+func (a *App) removeMessage(chat, id string) {
+	var path string
+	a.db.QueryRow(`SELECT media_path FROM messages WHERE chat=? AND id=?`, chat, id).Scan(&path)
+	a.db.Exec(`DELETE FROM messages WHERE chat=? AND id=?`, chat, id)
+	a.db.Exec(`DELETE FROM reactions WHERE chat=? AND msg_id=?`, chat, id)
+	if path != "" && strings.HasPrefix(path, filepath.Join(a.dir, "media")+"/") {
+		os.Remove(path)
+	}
+	a.emit(map[string]any{"type": "messages", "chat": chat})
+	a.emit(map[string]any{"type": "chats"})
 }

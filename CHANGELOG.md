@@ -2,6 +2,12 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.7.9
+
+- Delete for Me: any message can be removed from your own devices; Delete for Everyone stays for your messages of the last two and a half days, both from "Delete…" in the message menu
+- Messages deleted for you on the phone disappear here too
+- Restarting to update is reliable: the new version is put in place only after the app has quit, and an open Settings window no longer keeps it from quitting
+
 ## 0.7.8
 
 - Older messages are fetched from your phone: a chat that had only a few messages on this Mac fills in when opened, and "Get older messages from your phone" at the top of a conversation brings more

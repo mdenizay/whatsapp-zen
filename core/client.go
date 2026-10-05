@@ -474,6 +474,9 @@ func (a *App) handle(raw any) {
 		chat := a.pn(evt.ChatJID).String()
 		a.db.Exec(`UPDATE messages SET starred=? WHERE chat=? AND id=?`, evt.Action.GetStarred(), chat, evt.MessageID)
 		a.emit(map[string]any{"type": "messages", "chat": chat})
+	case *events.DeleteForMe:
+		// Deleted for me on another of the user's devices.
+		a.removeMessage(a.pn(evt.ChatJID).String(), evt.MessageID)
 	case *events.MarkChatAsRead:
 		if evt.Action.GetRead() {
 			a.markReadLocal(a.pn(evt.JID).String())
