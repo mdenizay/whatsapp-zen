@@ -53,6 +53,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.authenticating = false }
         }
 
+        Prefs.shared.$compactWindow.dropFirst().removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.applyCompactWindow($0) }
+            .store(in: &subscriptions)
+
         model.objectWillChange
             .receive(on: DispatchQueue.main)
             .map { [model] in model.totalUnread }
@@ -110,7 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                           backing: .buffered, defer: false)
         window.title = "WhatsApp"
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 700, height: 460)
+        window.minSize = Self.minSize(compact: Prefs.shared.compactWindow)
         window.toolbarStyle = .unified
         window.titlebarSeparatorStyle = .none
         window.contentView = makeMainContent()
@@ -118,6 +123,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.center()
         // Snapshots use a fixed size and must not disturb the saved frame.
         if ProcessInfo.processInfo.environment["WA_SNAPSHOT"] == nil { window.setFrameAutosaveName("main") }
+        // The one-column layout never opens in a wide window.
+        if Prefs.shared.compactWindow, window.frame.width > 600 {
+            var frame = window.frame
+            frame.size.width = 400
+            window.setFrame(frame, display: false)
+        }
     }
 
     private func makeMainContent() -> NSView {
@@ -463,11 +474,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc func showMainWindow() { showWindow() }
 
-    @objc func toggleCompact() { Prefs.shared.compact.toggle() }
+    @objc func toggleCompact() { Prefs.shared.compactWindow.toggle() }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        if item.action == #selector(toggleCompact) { item.state = Prefs.shared.compact ? .on : .off }
+        if item.action == #selector(toggleCompact) { item.state = Prefs.shared.compactWindow ? .on : .off }
         return true
+    }
+
+    private static func minSize(compact: Bool) -> NSSize {
+        compact ? NSSize(width: 340, height: 460) : NSSize(width: 700, height: 460)
+    }
+
+    /// Narrows the window for the one-column layout, and gives back the width
+    /// it had when leaving it.
+    private func applyCompactWindow(_ compact: Bool) {
+        window.minSize = Self.minSize(compact: compact)
+        var frame = window.frame
+        if compact {
+            UserDefaults.standard.set(NSStringFromRect(frame), forKey: "wideWindowFrame")
+            frame.size.width = 400
+        } else {
+            let saved = UserDefaults.standard.string(forKey: "wideWindowFrame").map(NSRectFromString)
+            frame.size.width = max(saved?.width ?? 1040, 700)
+            if let screen = window.screen?.visibleFrame {
+                frame.origin.x = min(frame.origin.x, screen.maxX - frame.width)
+                frame.origin.x = max(frame.origin.x, screen.minX)
+            }
+        }
+        window.setFrame(frame, display: true, animate: true)
     }
 
     /// Opens a chat in a window of its own, next to the main one.

@@ -371,5 +371,7 @@
 "They are shown only under this list. Unread still shows them." = "Solo se muestran en esta lista. No leídos los sigue mostrando.";
 "View" = "Visualización";
 "Compact Mode" = "Modo compacto";
-"Compact mode" = "Modo compacto";
-"Smaller rows and tighter messages, to see more at once. ⌥⌘C switches it from anywhere." = "Filas más pequeñas y mensajes más juntos para ver más a la vez. ⌥⌘C lo activa desde cualquier lugar.";
+"Compact window" = "Ventana compacta";
+"A narrow window with one column, like the phone: chats open over the list, and ⌘[ goes back. ⌥⌘C switches it from anywhere." = "Una ventana estrecha de una columna, como en el teléfono: los chats se abren sobre la lista y ⌘[ vuelve. ⌥⌘C lo activa desde cualquier lugar.";
+"Dense layout" = "Diseño denso";
+"Smaller rows and tighter messages, to see more at once." = "Filas más pequeñas y mensajes más juntos para ver más a la vez.";

@@ -371,5 +371,7 @@
 "They are shown only under this list. Unread still shows them." = "Они видны только в этом списке. В «Непрочитанных» они остаются.";
 "View" = "Вид";
 "Compact Mode" = "Компактный режим";
-"Compact mode" = "Компактный режим";
-"Smaller rows and tighter messages, to see more at once. ⌥⌘C switches it from anywhere." = "Строки меньше, сообщения плотнее — видно больше сразу. ⌥⌘C переключает режим откуда угодно.";
+"Compact window" = "Компактное окно";
+"A narrow window with one column, like the phone: chats open over the list, and ⌘[ goes back. ⌥⌘C switches it from anywhere." = "Узкое окно в одну колонку, как на телефоне: чаты открываются поверх списка, ⌘[ — назад. ⌥⌘C переключает откуда угодно.";
+"Dense layout" = "Плотная компоновка";
+"Smaller rows and tighter messages, to see more at once." = "Строки меньше, сообщения плотнее — видно больше сразу.";

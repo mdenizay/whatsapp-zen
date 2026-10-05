@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 struct MainView: View {
     @EnvironmentObject var store: AppStore
     @EnvironmentObject var model: AppModel
+    @ObservedObject private var prefs = Prefs.shared
 
     private var pairing: Bool {
         ["starting", "qr", "logged_out"].contains(store.state)
@@ -16,48 +17,11 @@ struct MainView: View {
             if pairing {
                 PairingView()
             } else {
-                NavigationSplitView(columnVisibility: $model.sidebarVisibility) {
-                    Sidebar(newChat: $model.showingNewChat)
-                        // The system's own sidebar button stays: the toolbar item it
-                        // brings is what ties the toolbar's split to the list's edge.
-                        // Without it the list snapped to the width of its buttons.
-                        .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 440)
-                } detail: {
-                    Group {
-                        if let chat = store.selectedChat {
-                            if let other = store.chats.first(where: { $0.jid == store.splitChat }), other.jid != chat.jid {
-                                SplitChats(chat: chat, other: other)
-                            } else {
-                                ChatView(chat: chat)
-                            }
-                        } else {
-                            // The theme belongs to the whole window, not only to an
-                            // open chat. Inside a scroll view because the toolbar is
-                            // see-through only above scrolling content; over anything
-                            // else it draws an opaque strip across the theme.
-                            ScrollView {
-                                ContentUnavailableView(L("Select a chat"), systemImage: "bubble.left.and.bubble.right",
-                                                       description: Text(L("Pick a chat on the left, or start a new one.")))
-                                    .containerRelativeFrame([.horizontal, .vertical])
-                            }
-                            .scrollDisabled(true)
-                            .scrollEdgeEffectStyle(.soft, for: .all)
-                            .background { ChatWallpaper() }
-                            .toolbar(removing: .title)
-                            .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-                            .ignoresSafeArea(.container, edges: .top)
-                        }
-                    }
-                    // A fixed ideal width. Left to itself the conversation asks
-                    // for the width of its longest message, differently for
-                    // every chat, and the split view answers each time by
-                    // resizing the chat list.
-                    .frame(minWidth: 380, idealWidth: 640, maxWidth: .infinity, maxHeight: .infinity)
-                    .toolbar {
-                        // With the list hidden, recent chats are one click away.
-                        if model.sidebarHidden {
-                            ToolbarItem(placement: .navigation) { RecentChatsMenu() }
-                        }
+                Group {
+                    if prefs.compactWindow {
+                        CompactLayout()
+                    } else {
+                        splitLayout
                     }
                 }
                 .sheet(isPresented: $model.showingNewChat) { NewChatView() }
@@ -75,28 +39,109 @@ struct MainView: View {
             ReleaseNotesSheet(notes: model.releaseNotes ?? "")
         }
         .sheet(isPresented: $model.showingSetup) { SetupWizard() }
-        .onAppear {
-            guard !AppStore.isDemo || ProcessInfo.processInfo.environment["WA_SETUP"] != nil else { return }
-            if !Prefs.shared.onboarded {
-                // A brand-new install gets the setup; someone updating from a
-                // version without it already has their preferences.
-                let fresh = Prefs.shared.notesShownFor.isEmpty
-                Prefs.shared.onboarded = true
-                Prefs.shared.notesShownFor = Links.version
-                if fresh { model.showingSetup = true }
-                return
-            }
-            // After an update, say what changed, once.
-            guard Prefs.shared.notesShownFor != Links.version else { return }
-            Prefs.shared.notesShownFor = Links.version
-            model.releaseNotes = ReleaseNotes.current()
-        }
+        .onAppear(perform: welcome)
         .quickLookPreview($store.previewURL)
         .alert(L("Error"), isPresented: Binding(get: { store.errorText != nil && !pairing }, set: { if !$0 { store.errorText = nil } })) {
             Button(L("OK")) { store.errorText = nil }
         } message: {
             Text(store.errorText ?? "")
         }
+    }
+
+    private var splitLayout: some View {
+        NavigationSplitView(columnVisibility: $model.sidebarVisibility) {
+            Sidebar(newChat: $model.showingNewChat)
+                // The system's own sidebar button stays: the toolbar item it
+                // brings is what ties the toolbar's split to the list's edge.
+                // Without it the list snapped to the width of its buttons.
+                .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 440)
+        } detail: {
+            Group {
+                if let chat = store.selectedChat {
+                    if let other = store.chats.first(where: { $0.jid == store.splitChat }), other.jid != chat.jid {
+                        SplitChats(chat: chat, other: other)
+                    } else {
+                        ChatView(chat: chat)
+                    }
+                } else {
+                    // The theme belongs to the whole window, not only to an
+                    // open chat. Inside a scroll view because the toolbar is
+                    // see-through only above scrolling content; over anything
+                    // else it draws an opaque strip across the theme.
+                    ScrollView {
+                        ContentUnavailableView(L("Select a chat"), systemImage: "bubble.left.and.bubble.right",
+                                               description: Text(L("Pick a chat on the left, or start a new one.")))
+                            .containerRelativeFrame([.horizontal, .vertical])
+                    }
+                    .scrollDisabled(true)
+                    .scrollEdgeEffectStyle(.soft, for: .all)
+                    .background { ChatWallpaper() }
+                    .toolbar(removing: .title)
+                    .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+                    .ignoresSafeArea(.container, edges: .top)
+                }
+            }
+            // A fixed ideal width. Left to itself the conversation asks
+            // for the width of its longest message, differently for
+            // every chat, and the split view answers each time by
+            // resizing the chat list.
+            .frame(minWidth: 380, idealWidth: 640, maxWidth: .infinity, maxHeight: .infinity)
+            .toolbar {
+                // With the list hidden, recent chats are one click away.
+                if model.sidebarHidden {
+                    ToolbarItem(placement: .navigation) { RecentChatsMenu() }
+                }
+            }
+        }
+    }
+
+    private func welcome() {
+        guard !AppStore.isDemo || ProcessInfo.processInfo.environment["WA_SETUP"] != nil else { return }
+        if !Prefs.shared.onboarded {
+            // A brand-new install gets the setup; someone updating from a
+            // version without it already has their preferences.
+            let fresh = Prefs.shared.notesShownFor.isEmpty
+            Prefs.shared.onboarded = true
+            Prefs.shared.notesShownFor = Links.version
+            if fresh { model.showingSetup = true }
+            return
+        }
+        // After an update, say what changed, once.
+        guard Prefs.shared.notesShownFor != Links.version else { return }
+        Prefs.shared.notesShownFor = Links.version
+        model.releaseNotes = ReleaseNotes.current()
+    }
+}
+
+/// One column, as on the phone: the chat list, and a chat opened over it with
+/// a way back. For a narrow window kept beside other work.
+struct CompactLayout: View {
+    @EnvironmentObject var store: AppStore
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        ZStack {
+            if let chat = store.selectedChat {
+                ChatView(chat: chat)
+                    .toolbar {
+                        ToolbarItem(placement: .navigation) {
+                            Button { store.open(nil) } label: {
+                                Label(L("Back to chats"), systemImage: "chevron.left")
+                            }
+                            .keyboardShortcut("[", modifiers: .command)
+                            .help(L("Back to chats") + " (⌘[)")
+                        }
+                    }
+                    .transition(.move(edge: .trailing))
+            } else {
+                Sidebar(newChat: $model.showingNewChat)
+                    .background { ChatWallpaper() }
+                    // The window is narrow; its buttons need the title's room.
+                    .toolbar(removing: .title)
+                    .transition(.move(edge: .leading))
+            }
+        }
+        .animation(.snappy(duration: 0.25), value: store.selected)
     }
 }
 
@@ -546,9 +591,12 @@ struct ChatView: View {
                         StarredView(chat: chat) { showingStarred = false }.environmentObject(store)
                     }
                     .help(L("Starred Messages"))
-                Button(L("Info"), systemImage: "info.circle") { showingInfo = true }
-                    .keyboardShortcut("i")
-                    .help(L("Chat info, media and settings"))
+                // In the narrow window the photo and name do this, and room is short.
+                if !Prefs.shared.compactWindow {
+                    Button(L("Info"), systemImage: "info.circle") { showingInfo = true }
+                        .keyboardShortcut("i")
+                        .help(L("Chat info, media and settings"))
+                }
             }
         }
         .sheet(item: $forwarding) { ForwardSheet(message: $0) }

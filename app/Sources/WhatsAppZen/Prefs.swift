@@ -27,6 +27,8 @@ final class Prefs: ObservableObject {
     @Published var fontSize: Double = value("fontSize", 13) { didSet { saveLook("fontSize", fontSize) } }
     @Published var accent: String = value("accent", "green") { didSet { saveLook("accent", accent) } }
     @Published var compact: Bool = value("compact", false) { didSet { save("compact", compact) } }
+    /// One narrow column, like the phone: chats open over the list.
+    @Published var compactWindow: Bool = value("compactWindow", false) { didSet { save("compactWindow", compactWindow) } }
 
     // Personalization
     /// "system", "light" or "dark".

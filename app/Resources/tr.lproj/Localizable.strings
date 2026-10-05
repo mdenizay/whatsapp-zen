@@ -371,5 +371,7 @@
 "They are shown only under this list. Unread still shows them." = "Yalnızca bu listede görünürler. Okunmamış'ta yine çıkarlar.";
 "View" = "Görünüm";
 "Compact Mode" = "Kompakt Mod";
-"Compact mode" = "Kompakt mod";
-"Smaller rows and tighter messages, to see more at once. ⌥⌘C switches it from anywhere." = "Daha küçük satırlar ve sık mesajlarla bir bakışta daha fazlasını görün. ⌥⌘C her yerden açıp kapatır.";
+"Compact window" = "Kompakt pencere";
+"A narrow window with one column, like the phone: chats open over the list, and ⌘[ goes back. ⌥⌘C switches it from anywhere." = "Telefondaki gibi tek sütunlu dar bir pencere: sohbetler listenin üstünde açılır, ⌘[ geri döner. ⌥⌘C her yerden açıp kapatır.";
+"Dense layout" = "Sık düzen";
+"Smaller rows and tighter messages, to see more at once." = "Daha küçük satırlar ve sık mesajlarla bir bakışta daha fazlasını görün.";

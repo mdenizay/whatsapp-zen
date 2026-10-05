@@ -783,10 +783,17 @@ struct AppearanceSettings: View {
                 ThemePicker().padding(.vertical, 4)
             }
             Section {
+                Toggle(isOn: $prefs.compactWindow) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("Compact window"))
+                        Text(L("A narrow window with one column, like the phone: chats open over the list, and ⌘[ goes back. ⌥⌘C switches it from anywhere."))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 Toggle(isOn: $prefs.compact) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(L("Compact mode"))
-                        Text(L("Smaller rows and tighter messages, to see more at once. ⌥⌘C switches it from anywhere."))
+                        Text(L("Dense layout"))
+                        Text(L("Smaller rows and tighter messages, to see more at once."))
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }

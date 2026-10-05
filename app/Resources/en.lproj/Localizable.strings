@@ -372,5 +372,7 @@
 "They are shown only under this list. Unread still shows them." = "They are shown only under this list. Unread still shows them.";
 "View" = "View";
 "Compact Mode" = "Compact Mode";
-"Compact mode" = "Compact mode";
-"Smaller rows and tighter messages, to see more at once. ⌥⌘C switches it from anywhere." = "Smaller rows and tighter messages, to see more at once. ⌥⌘C switches it from anywhere.";
+"Compact window" = "Compact window";
+"A narrow window with one column, like the phone: chats open over the list, and ⌘[ goes back. ⌥⌘C switches it from anywhere." = "A narrow window with one column, like the phone: chats open over the list, and ⌘[ goes back. ⌥⌘C switches it from anywhere.";
+"Dense layout" = "Dense layout";
+"Smaller rows and tighter messages, to see more at once." = "Smaller rows and tighter messages, to see more at once.";

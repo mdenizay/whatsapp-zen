@@ -2,6 +2,11 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.8.4
+
+- Compact window: a narrow window with a single column, like WhatsApp on the phone. Chats open over the list and ⌘[ (or the arrow beside the name) goes back. Switch it with ⌥⌘C, from View › Compact Mode, or in Settings › Appearance; the window narrows, and widens back when you leave it
+- The tighter spacing from 0.8.3 is now called Dense layout and stays in Settings › Appearance
+
 ## 0.8.3
 
 - Compact mode for the whole app: smaller chat rows, tighter message bubbles and spacing, and a denser menu bar panel. Switch it in Settings › Appearance, from View › Compact Mode, or with ⌥⌘C
