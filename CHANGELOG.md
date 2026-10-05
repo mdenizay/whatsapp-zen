@@ -2,6 +2,13 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.8.2
+
+- Long messages can be scrolled while you write them: the field grows to eight lines, then scrolls with the mouse or trackpad
+- WhatsApp formatting shows in messages: *bold*, _italic_, ~strikethrough~, `code` and ```monospace``` blocks
+- Markdown's **bold** (and __italic__, ~~strikethrough~~), common in pasted text, shows as bold and is sent as WhatsApp's *bold*, so the other side sees it too
+- Formatting markers are left out of the chat list previews
+
 ## 0.8.1
 
 - The + for a new list sits next to Archived instead of starting a line of its own

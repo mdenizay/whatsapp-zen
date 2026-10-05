@@ -40,7 +40,8 @@ struct Chat: Decodable, Identifiable, Equatable {
 
     /// One-line preview of the newest message for chat lists.
     var preview: String {
-        let body = Message.label(type: lastType, text: lastText, fileName: lastFile)
+        var body = Message.label(type: lastType, text: lastText, fileName: lastFile)
+        if body.contains(where: { "*_~`".contains($0) }) { body = MessageFormat.plain(body) }
         if isGroup, !lastFromMe, !lastSender.isEmpty { return "\(lastSender): \(body)" }
         return body
     }

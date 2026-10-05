@@ -184,7 +184,7 @@ struct MessageRow: View {
             meta.frame(maxWidth: .infinity, alignment: .trailing)
         } else if !message.text.isEmpty {
             HStack(alignment: .lastTextBaseline, spacing: 8) {
-                Text(Self.linkified(message.text)).font(.system(size: prefs.fontSize, design: prefs.design)).textSelection(.enabled)
+                Text(MessageFormat.attributed(message.text)).font(.system(size: prefs.fontSize, design: prefs.design)).textSelection(.enabled)
                 meta
             }
         } else if !bare {
@@ -297,22 +297,6 @@ struct MessageRow: View {
         guard let image = NSImage(contentsOfFile: path) else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.writeObjects([image])
-    }
-
-    private static let linkDetector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
-
-    /// Plain text with URLs turned into clickable links.
-    static func linkified(_ text: String) -> AttributedString {
-        var out = AttributedString(text)
-        guard let detector = linkDetector else { return out }
-        for match in detector.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
-            guard let url = match.url, let range = Range(match.range, in: text),
-                  let lower = AttributedString.Index(range.lowerBound, within: out),
-                  let upper = AttributedString.Index(range.upperBound, within: out) else { continue }
-            out[lower..<upper].link = url
-            out[lower..<upper].underlineStyle = .single
-        }
-        return out
     }
 }
 

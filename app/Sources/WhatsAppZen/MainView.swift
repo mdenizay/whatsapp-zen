@@ -884,7 +884,9 @@ struct ComposerBar: View {
     var onTyping: () -> Void = {}
     let onSend: () -> Void
 
-    @FocusState private var focused: Bool
+    /// Bumped to put the caret in the message field.
+    @State private var focusRequest = 0
+    @State private var fieldHeight: CGFloat = 16
     /// WA_ATTACH (demo snapshots) starts with the + panel open.
     @State private var attaching = ProcessInfo.processInfo.environment["WA_ATTACH"] != nil
     @StateObject private var recorder = VoiceRecorder()
@@ -953,43 +955,30 @@ struct ComposerBar: View {
                     if let error = recorder.error {
                         Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 14).padding(.top, 8)
                     }
-                    TextField(placeholder, text: $text, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .lineLimit(1...8)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .frame(minHeight: Self.height)
-                        .focused($focused)
-                        .onSubmit { if canSend { submit() } }
-                        // ⇧↩ and ⌥↩ start a new line; ↩ alone sends.
-                        .onKeyPress(.return, phases: .down) { press in
-                            guard !press.modifiers.intersection([.shift, .option]).isEmpty else { return .ignored }
-                            // Into the field editor, so the line breaks where the caret is.
-                            let windows = [NSApp.keyWindow].compactMap { $0 } + NSApp.windows
-                            guard let editor = windows.lazy.compactMap({ $0.firstResponder as? NSTextView }).first else {
-                                text += "\n"
-                                return .handled
-                            }
-                            editor.insertNewlineIgnoringFieldEditor(nil)
-                            return .handled
-                        }
+                    ComposerTextView(
+                        text: $text, placeholder: placeholder, height: $fieldHeight, focusRequest: focusRequest,
+                        onSubmit: { if canSend { submit() } },
                         // Esc drops the reply or the edit being written.
-                        .onKeyPress(.escape) {
+                        onEscape: {
                             if editing != nil {
                                 editing = nil
                                 text = ""
                             } else if reply != nil {
                                 reply = nil
                             } else {
-                                return .ignored
+                                return false
                             }
-                            return .handled
-                        }
-                        .onKeyPress(.upArrow) {
-                            guard text.isEmpty, editing == nil, let onEditLast else { return .ignored }
+                            return true
+                        },
+                        onUpArrow: {
+                            guard text.isEmpty, editing == nil, let onEditLast else { return false }
                             onEditLast()
-                            return .handled
-                        }
+                            return true
+                        })
+                        .frame(height: fieldHeight)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 9)
+                        .frame(minHeight: Self.height)
                         .onChange(of: text) { old, new in
                             if !new.isEmpty { onTyping() }
                             // ":)" then a space becomes 🙂. Only when a character
@@ -1020,10 +1009,10 @@ struct ComposerBar: View {
         // keyboard again each time; the click that picked the chat left the
         // focus in the chat list.
         .onChange(of: panelChat?.jid) { _, _ in focusSoon() }
-        .onChange(of: reply?.id) { _, _ in focused = true }
-        .onChange(of: editing?.id) { _, _ in focused = true }
-        .onChange(of: image?.id) { _, _ in focused = true }
-        .onChange(of: file?.id) { _, _ in focused = true }
+        .onChange(of: reply?.id) { _, _ in focusRequest += 1 }
+        .onChange(of: editing?.id) { _, _ in focusRequest += 1 }
+        .onChange(of: image?.id) { _, _ in focusRequest += 1 }
+        .onChange(of: file?.id) { _, _ in focusRequest += 1 }
     }
 
     /// The name being typed after an "@" at the end of the text, if any.
@@ -1074,13 +1063,13 @@ struct ComposerBar: View {
 
     /// Takes the keyboard once the click that led here has finished.
     private func focusSoon() {
-        focused = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { focused = true }
+        focusRequest += 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { focusRequest += 1 }
     }
 
     /// Sends, converting an emoticon that was typed last and never followed by a space.
     private func submit() {
-        if editing == nil || !text.isEmpty { text = Emoticons.convert(text) }
+        if editing == nil || !text.isEmpty { text = MessageFormat.normalized(Emoticons.convert(text)) }
         onSend()
     }
 
