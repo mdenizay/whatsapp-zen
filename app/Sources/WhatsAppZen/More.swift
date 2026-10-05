@@ -782,6 +782,12 @@ struct AppearanceSettings: View {
             Section {
                 ThemePicker().padding(.vertical, 4)
             }
+            Section(L("Themes")) {
+                ThemeGallery()
+            }
+            Section(L("Colours")) {
+                ThemeColors()
+            }
             Section {
                 Toggle(isOn: $prefs.compactWindow) {
                     VStack(alignment: .leading, spacing: 2) {

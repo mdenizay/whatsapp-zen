@@ -379,3 +379,13 @@
 "Save As…" = "Сохранить как…";
 "Saved to Downloads" = "Сохранено в «Загрузки»";
 "Saved to Downloads. Click to show in Finder." = "Сохранено в «Загрузки». Нажмите, чтобы показать в Finder.";
+"Themes" = "Темы";
+"Colours" = "Цвета";
+"Accent" = "Акцент";
+"Chat background" = "Фон чата";
+"Chat list" = "Список чатов";
+"Incoming bubble" = "Входящее сообщение";
+"Outgoing bubble" = "Исходящее сообщение";
+"Window transparency" = "Прозрачность окна";
+"Reset Colours" = "Сбросить цвета";
+"Playback speed" = "Скорость воспроизведения";

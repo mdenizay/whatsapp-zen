@@ -47,6 +47,21 @@ final class Prefs: ObservableObject {
     /// Second colour of the "theme" background as 0xRRGGBB; -1 for a single colour.
     @Published var themeColor2: Int = value("themeColor2", Prefs.defaultSecond) { didSet { saveLook("themeColor2", themeColor2) } }
 
+    /// Third colour of the background, or -1.
+    @Published var themeColor3: Int = value("themeColor3", -1) { didSet { saveLook("themeColor3", themeColor3) } }
+    /// Colours a ready-made theme (or the user) sets outright, as 0xRRGGBB;
+    /// -1 leaves each to the system's own.
+    @Published var themeBase: Int = value("themeBase", -1) { didSet { saveLook("themeBase", themeBase) } }
+    @Published var themeSidebar: Int = value("themeSidebar", -1) { didSet { saveLook("themeSidebar", themeSidebar) } }
+    @Published var bubbleInColor: Int = value("bubbleInColor", -1) { didSet { saveLook("bubbleInColor", bubbleInColor) } }
+    @Published var bubbleOutColor: Int = value("bubbleOutColor", -1) { didSet { saveLook("bubbleOutColor", bubbleOutColor) } }
+    /// The accent exactly as given, where `customAccent` is adjusted to work as one.
+    @Published var themeAccent: Int = value("themeAccent", -1) { didSet { saveLook("themeAccent", themeAccent) } }
+    /// How solid the window's background is; below 1 the desktop shows through, blurred.
+    @Published var windowOpacity: Double = value("windowOpacity", 1.0) { didSet { saveLook("windowOpacity", windowOpacity) } }
+    /// The ready-made theme in use, for marking it in the gallery.
+    @Published var themeName: String = value("themeName", "") { didSet { saveLook("themeName", themeName) } }
+
     /// A theme starts with two colours: the default green and its opposite.
     static let defaultSecond = ThemePicker.color(at: ThemePicker.opposite(ThemePicker.position(of: 0x1DAA61)))
     /// How strongly the theme colours wash the window (0.05 … 0.6).
@@ -143,7 +158,8 @@ final class Prefs: ObservableObject {
     @Published private(set) var ownLook = false
 
     private func saveLook(_ key: String, _ value: Any) {
-        guard !loading else { return }
+        // The demo shares the real preferences; trying a look there must not keep it.
+        guard !loading, !AppStore.isDemo else { return }
         UserDefaults.standard.set(value, forKey: scope + key)
     }
 
@@ -167,6 +183,14 @@ final class Prefs: ObservableObject {
         // No second colour stored: pair the first with its opposite.
         themeColor2 = look("themeColor2", ThemePicker.color(at: ThemePicker.opposite(ThemePicker.position(of: customAccent))))
         themeIntensity = look("themeIntensity", 0.22)
+        themeColor3 = look("themeColor3", -1)
+        themeBase = look("themeBase", -1)
+        themeSidebar = look("themeSidebar", -1)
+        bubbleInColor = look("bubbleInColor", -1)
+        bubbleOutColor = look("bubbleOutColor", -1)
+        themeAccent = look("themeAccent", -1)
+        windowOpacity = look("windowOpacity", 1.0)
+        themeName = look("themeName", "")
     }
 
     /// Called when the active account changes: brings in that account's look.
@@ -189,7 +213,9 @@ final class Prefs: ObservableObject {
             for (key, value) in [("fontSize", fontSize), ("accent", accent), ("appearance", appearance), ("customAccent", customAccent),
                                  ("bubbleRadius", bubbleRadius), ("wallpaper", wallpaper), ("wallpaperPath", wallpaperPath),
                                  ("wallpaperDim", wallpaperDim), ("fontDesign", fontDesign), ("themeColor2", themeColor2),
-                                 ("themeIntensity", themeIntensity)] as [(String, Any)] {
+                                 ("themeIntensity", themeIntensity), ("themeColor3", themeColor3), ("themeBase", themeBase),
+                                 ("themeSidebar", themeSidebar), ("bubbleInColor", bubbleInColor), ("bubbleOutColor", bubbleOutColor),
+                                 ("themeAccent", themeAccent), ("windowOpacity", windowOpacity), ("themeName", themeName)] as [(String, Any)] {
                 UserDefaults.standard.set(value, forKey: scope + key)
             }
         } else {

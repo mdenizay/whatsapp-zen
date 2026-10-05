@@ -214,6 +214,7 @@ struct Sidebar: View {
     @State private var hits: [Message] = []
     @State private var filter = ChatFilter.all
     @State private var listEditor: ListEditorTarget?
+    @ObservedObject private var prefs = Prefs.shared
 
     private var chats: [Chat] {
         let shown = store.chats.filter { chat in
@@ -288,6 +289,11 @@ struct Sidebar: View {
                     }
                 }
             }
+        }
+        // A theme with a chat-list colour of its own replaces the system's material.
+        .scrollContentBackground(prefs.themeSidebar >= 0 ? .hidden : .automatic)
+        .background {
+            if prefs.themeSidebar >= 0 { Color(hex: prefs.themeSidebar).opacity(prefs.windowOpacity).ignoresSafeArea() }
         }
         .searchable(text: $query, placement: .sidebar, prompt: L("Search"))
         .task(id: query) {
@@ -716,7 +722,10 @@ struct ChatWallpaper: View {
 
     var body: some View {
         ZStack {
-            Color(nsColor: .textBackgroundColor)
+            // Less than solid: the desktop shows through, blurred.
+            if prefs.windowOpacity < 0.995 { BehindWindowBlur() }
+            (prefs.themeBase >= 0 ? Color(hex: prefs.themeBase) : Color(nsColor: .textBackgroundColor))
+                .opacity(prefs.windowOpacity)
             switch prefs.wallpaper {
             case "tint":
                 Theme.accent.opacity(0.07)
@@ -726,7 +735,8 @@ struct ChatWallpaper: View {
                 // The theme picker's colours: one colour fading out, or two blending.
                 let first = Color(hex: prefs.customAccent)
                 let second = prefs.themeColor2 >= 0 ? Color(hex: prefs.themeColor2) : first.opacity(0.15)
-                LinearGradient(colors: [first, second], startPoint: .topLeading, endPoint: .bottomTrailing)
+                let third = prefs.themeColor2 >= 0 && prefs.themeColor3 >= 0 ? [Color(hex: prefs.themeColor3)] : []
+                LinearGradient(colors: [first, second] + third, startPoint: .topLeading, endPoint: .bottomTrailing)
                     .opacity(prefs.themeIntensity)
             case "image":
                 if let picture = prefs.wallpaperPicture() {
@@ -743,6 +753,19 @@ struct ChatWallpaper: View {
         }
         .ignoresSafeArea()
     }
+}
+
+/// The desktop behind the window, blurred, for a see-through background.
+struct BehindWindowBlur: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.blendingMode = .behindWindow
+        view.material = .underWindowBackground
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
 }
 
 /// The + panel. Everything opens here, anchored to the + button: the grid of

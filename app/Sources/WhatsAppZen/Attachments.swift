@@ -79,15 +79,24 @@ enum Attachments {
 final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     static let shared = AudioPlayer()
 
+    /// The voice message that is loaded: playing, or paused part-way.
     @Published private(set) var playingID: String?
+    @Published private(set) var paused = false
     @Published private(set) var progress = 0.0
+    /// Playback speed: 1, 1.5 or 2.
+    @Published private(set) var rate: Float = 1
 
     private var player: AVAudioPlayer?
     private var timer: Timer?
 
-    func toggle(id: String, path: String) {
+    var elapsed: TimeInterval { player?.currentTime ?? 0 }
+
+    /// Plays a message, or pauses and resumes the one already loaded. `at`
+    /// starts from that fraction of its length.
+    func toggle(id: String, path: String, at fraction: Double? = nil) {
         if playingID == id {
-            stop()
+            if let fraction { seek(to: fraction) }
+            if paused || fraction != nil { resume() } else { pause() }
             return
         }
         stop()
@@ -97,13 +106,43 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             return
         }
         player.delegate = self
-        player.play()
+        player.enableRate = true
+        player.rate = rate
         self.player = player
         playingID = id
+        if let fraction { seek(to: fraction) }
+        resume()
+    }
+
+    func pause() {
+        player?.pause()
+        paused = true
+        timer?.invalidate()
+        timer = nil
+    }
+
+    private func resume() {
+        guard let player else { return }
+        player.play()
+        paused = false
+        timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             guard let self, let p = self.player, p.duration > 0 else { return }
             self.progress = p.currentTime / p.duration
         }
+    }
+
+    /// Jumps to a fraction of the loaded message's length.
+    func seek(to fraction: Double) {
+        guard let player, player.duration > 0 else { return }
+        let clamped = min(max(fraction, 0), 0.999)
+        player.currentTime = clamped * player.duration
+        progress = clamped
+    }
+
+    func cycleRate() {
+        rate = rate == 1 ? 1.5 : rate == 1.5 ? 2 : 1
+        player?.rate = rate
     }
 
     func stop() {
@@ -112,6 +151,7 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
         player?.stop()
         player = nil
         playingID = nil
+        paused = false
         progress = 0
     }
 

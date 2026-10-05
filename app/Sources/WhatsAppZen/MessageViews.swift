@@ -39,9 +39,14 @@ struct MessageRow: View {
 
     @ObservedObject private var prefs = Prefs.shared
     @State private var hovering = false
+    /// How far a two-finger swipe has pulled this message aside.
+    @State private var swipe: CGFloat = 0
     @State private var picking = false
     @State private var confirmDelete = false
     @State private var stickerMenu = false
+
+    /// How far a message has to be pulled for the swipe to count.
+    private static let swipeToReply: CGFloat = 56
 
     private var mine: Bool { message.fromMe }
     /// WhatsApp takes a message back from everyone for about two and a half days.
@@ -80,7 +85,34 @@ struct MessageRow: View {
         .onTapGesture(count: 2) {
             if !message.deleted { actions.reply(message) }
         }
+        .offset(x: swipe)
+        // Pulled far enough, letting go replies.
+        .overlay(alignment: .leading) {
+            Image(systemName: "arrowshape.turn.up.left.fill")
+                .font(.callout)
+                .foregroundStyle(swipe >= Self.swipeToReply ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary))
+                .scaleEffect(swipe >= Self.swipeToReply ? 1.15 : 0.9)
+                .opacity(Double(min(swipe / Self.swipeToReply, 1)))
+                .padding(.leading, 4)
+                .allowsHitTesting(false)
+        }
         .onHover { hovering = $0 }
+        .onReceive(SwipeMonitor.shared.events) { event in
+            guard hovering || swipe != 0, !message.deleted else { return }
+            switch event {
+            case .moved(let x):
+                // Follows the fingers, with some resistance past the trigger point.
+                let pull = max(x, 0)
+                let next = pull <= Self.swipeToReply ? pull : Self.swipeToReply + (pull - Self.swipeToReply) * 0.25
+                if swipe < Self.swipeToReply, next >= Self.swipeToReply {
+                    NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
+                }
+                swipe = min(next, Self.swipeToReply + 24)
+            case .ended(let x):
+                if x >= Self.swipeToReply { actions.reply(message) }
+                withAnimation(.snappy(duration: 0.2)) { swipe = 0 }
+            }
+        }
         .contextMenu { menu }
         .confirmationDialog(L("Delete this message?"), isPresented: $confirmDelete) {
             if canDeleteForEveryone {
@@ -120,7 +152,7 @@ struct MessageRow: View {
         }
         .padding(.horizontal, bare ? 3 : (prefs.compact ? 9 : 11))
         .padding(.vertical, bare ? 3 : (prefs.compact ? 4 : 7))
-        .foregroundStyle(mine ? .white : .primary)
+        .foregroundStyle(mine ? .white : Theme.bubbleInText)
         .tint(mine ? .white : Theme.accent)
         .background(mine ? Theme.bubbleOut : Theme.bubbleIn, in: shape)
         // Someone mentioned you: the bubble gets an accent outline.
@@ -434,13 +466,19 @@ struct VoiceView: View {
     @ObservedObject private var player = AudioPlayer.shared
     @State private var busy = false
     @State private var failed = false
+    /// Where the bar is being dragged to, before the message is loaded.
+    @State private var scrub: Double?
 
-    private var playing: Bool { player.playingID == message.id }
-    private var duration: String { "\(message.w / 60):\(String(format: "%02d", message.w % 60))" }
+    /// Loaded in the player, playing or paused.
+    private var active: Bool { player.playingID == message.id }
+    private var playing: Bool { active && !player.paused }
+    private var fraction: Double { scrub ?? (active ? player.progress : 0) }
+
+    private static func clock(_ seconds: Int) -> String { "\(seconds / 60):\(String(format: "%02d", seconds % 60))" }
 
     var body: some View {
         HStack(spacing: 10) {
-            Button(action: toggle) {
+            Button { toggle() } label: {
                 ZStack {
                     Circle().fill(onBubble ? .white.opacity(0.22) : Theme.accent.opacity(0.18))
                     if busy {
@@ -455,38 +493,73 @@ struct VoiceView: View {
             .buttonStyle(.plain)
             .help(playing ? L("Pause") : L("Play"))
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 1) {
+                // Click or drag anywhere along the bar to move through the recording.
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
-                        Capsule().fill(onBubble ? .white.opacity(0.3) : .primary.opacity(0.15))
+                        Capsule().fill(onBubble ? .white.opacity(0.3) : .primary.opacity(0.15)).frame(height: 4)
                         Capsule().fill(onBubble ? .white : Theme.accent)
-                            .frame(width: geo.size.width * (playing ? player.progress : 0))
+                            .frame(width: geo.size.width * fraction, height: 4)
+                        Circle().fill(onBubble ? .white : Theme.accent)
+                            .frame(width: 10, height: 10)
+                            .offset(x: max(0, geo.size.width * fraction - 5))
+                            .opacity(active || scrub != nil ? 1 : 0)
+                    }
+                    .frame(maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            let to = min(max(value.location.x / geo.size.width, 0), 1)
+                            if active { player.seek(to: to) } else { scrub = to }
+                        }
+                        .onEnded { value in
+                            let to = min(max(value.location.x / geo.size.width, 0), 1)
+                            if active { player.seek(to: to) } else { toggle(at: to) }
+                        })
+                }
+                .frame(height: 16)
+                HStack(spacing: 6) {
+                    Text(failed ? L("Download failed")
+                        : (active ? "\(Self.clock(Int(player.elapsed))) / \(Self.clock(message.w))" : L("Voice message") + " · \(Self.clock(message.w))"))
+                        .monospacedDigit()
+                    Spacer(minLength: 0)
+                    if active {
+                        Button { player.cycleRate() } label: {
+                            Text(player.rate == 1 ? "1×" : player.rate == 1.5 ? "1.5×" : "2×")
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(onBubble ? AnyShapeStyle(.white.opacity(0.22)) : AnyShapeStyle(.primary.opacity(0.1)), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .help(L("Playback speed"))
                     }
                 }
-                .frame(height: 4)
-                Text(failed ? L("Download failed") : L("Voice message") + " · \(duration)")
-                    .font(.caption)
-                    .foregroundStyle(onBubble ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(.secondary))
+                .font(.caption)
+                .foregroundStyle(onBubble ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(.secondary))
             }
         }
         .frame(width: 210)
     }
 
-    private func toggle() {
+    private func toggle(at fraction: Double? = nil) {
         guard !busy else { return }
-        if playing {
-            player.stop()
+        if active {
+            // Already loaded: no download to wait for.
+            player.toggle(id: message.id, path: "", at: fraction)
             return
         }
         busy = true
         failed = false
         Task { @MainActor in
-            defer { busy = false }
+            defer {
+                busy = false
+                scrub = nil
+            }
             guard let path = await mediaPath(for: message) else {
                 failed = true
                 return
             }
-            player.toggle(id: message.id, path: path)
+            player.toggle(id: message.id, path: path, at: fraction)
         }
     }
 }

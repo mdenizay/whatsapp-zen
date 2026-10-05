@@ -30,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         makeWindow()
         makeStatusItem()
         installPasteMonitor()
+        SwipeMonitor.shared.start()
 
         Notifier.shared.openChat = { [weak self] account, chat in
             self?.model.activate(account)
@@ -314,6 +315,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func snapshotIfRequested() {
         guard let dir = ProcessInfo.processInfo.environment["WA_SNAPSHOT"], let store = model.active else { return }
         if ProcessInfo.processInfo.environment["WA_DARK"] != nil { NSApp.appearance = NSAppearance(named: .darkAqua) }
+        // WA_THEME=<id> shows a ready-made theme, WA_OPACITY=<0…1> a see-through window.
+        if let id = ProcessInfo.processInfo.environment["WA_THEME"], let theme = ThemePreset.all.first(where: { $0.id == id }) { theme.apply() }
+        if let opacity = Double(ProcessInfo.processInfo.environment["WA_OPACITY"] ?? "") { Prefs.shared.windowOpacity = opacity }
         let out = URL(fileURLWithPath: dir)
         // The window server's own picture of a window: the real rendering,
         // glass included. A process may capture its own windows without the

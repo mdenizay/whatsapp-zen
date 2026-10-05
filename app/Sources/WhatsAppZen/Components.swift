@@ -22,15 +22,31 @@ extension Color {
 
 enum Theme {
     static var accent: Color {
+        if Prefs.shared.themeAccent >= 0 { return Color(hex: Prefs.shared.themeAccent) }
         let entry = Prefs.shared.accentEntry
         return Color(light: entry.light, dark: entry.dark)
     }
     /// Outgoing bubbles carry white text, so this stays dark enough in both modes.
     static var bubbleOut: Color {
+        if Prefs.shared.bubbleOutColor >= 0 { return Color(hex: Prefs.shared.bubbleOutColor) }
         let entry = Prefs.shared.accentEntry
         return Color(light: entry.bubbleLight, dark: entry.bubbleDark)
     }
-    static let bubbleIn = Color(light: 0xECECEF, dark: 0x2B2B2F)
+    static var bubbleIn: Color {
+        Prefs.shared.bubbleInColor >= 0 ? Color(hex: Prefs.shared.bubbleInColor) : Color(light: 0xECECEF, dark: 0x2B2B2F)
+    }
+    /// Text on an incoming bubble: the system's, unless the bubble has a colour
+    /// of its own, which may be light in dark mode or the reverse.
+    static var bubbleInText: Color {
+        let hex = Prefs.shared.bubbleInColor
+        guard hex >= 0 else { return .primary }
+        return isLight(hex) ? Color(hex: 0x1C1C1E) : Color(hex: 0xF2F2F7)
+    }
+
+    static func isLight(_ hex: Int) -> Bool {
+        let r = Double((hex >> 16) & 0xFF), g = Double((hex >> 8) & 0xFF), b = Double(hex & 0xFF)
+        return (0.299 * r + 0.587 * g + 0.114 * b) > 150
+    }
     static let readTick = Color(light: 0x2E9BE6, dark: 0x5CC4F5)
     /// Read ticks on top of the green outgoing bubble.
     static let readTickOnBubble = Color(light: 0xA6E9FF, dark: 0x9BE3FF)

@@ -2,6 +2,13 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.9.0
+
+- Ready-made themes in Settings › Appearance: Darcula, Dracula, Tokyo Night, Nord, Catppuccin, Gruvbox, One Dark, Monokai, Solarized, GitHub, Rosé Pine, Night Owl, SynthWave '84, Everforest, Ayu Mirage, WhatsApp Dark and light variants. Each sets the background, chat list, bubbles and accent
+- More to customise: a third colour in the colour field, a colour of your own for the accent, chat background, chat list and each bubble, and window transparency that lets the desktop show through
+- Swipe right with two fingers on a message to reply to it
+- Voice messages: click or drag along the bar to move through the recording, pause and carry on where you stopped, and play at 1×, 1.5× or 2×
+
 ## 0.8.5
 
 - Save to Downloads: a document in a chat has a download button beside it, which saves the file under its own name; a second click shows it in Finder

@@ -27,7 +27,10 @@ struct ThemePicker: View {
         return Int(color.redComponent * 255) << 16 | Int(color.greenComponent * 255) << 8 | Int(color.blueComponent * 255)
     }
 
-    private var colors: [Int] { prefs.themeColor2 >= 0 ? [prefs.customAccent, prefs.themeColor2] : [prefs.customAccent] }
+    private var colors: [Int] {
+        guard prefs.themeColor2 >= 0 else { return [prefs.customAccent] }
+        return prefs.themeColor3 >= 0 ? [prefs.customAccent, prefs.themeColor2, prefs.themeColor3] : [prefs.customAccent, prefs.themeColor2]
+    }
 
     /// The point straight across the centre of the field: the opposite colour.
     static func opposite(_ point: CGPoint) -> CGPoint {
@@ -39,7 +42,17 @@ struct ThemePicker: View {
     private func move(_ index: Int, to point: CGPoint) {
         let paired = prefs.themeColor2 >= 0
         let own = Self.color(at: point), other = Self.color(at: Self.opposite(point))
-        if index == 0 {
+        // The accent follows the main dot again, not a ready-made theme's.
+        prefs.themeAccent = -1
+        prefs.themeName = ""
+        if colors.count == 3 {
+            // Three colours are placed freely.
+            switch index {
+            case 0: prefs.customAccent = own
+            case 1: prefs.themeColor2 = own
+            default: prefs.themeColor3 = own
+            }
+        } else if index == 0 {
             prefs.customAccent = own
             if paired { prefs.themeColor2 = other }
         } else {
@@ -56,6 +69,7 @@ struct ThemePicker: View {
             HStack(spacing: 8) {
                 ForEach(Array(Self.presets.enumerated()), id: \.offset) { _, preset in
                     Button {
+                        ThemePreset.clearPalette()
                         prefs.customAccent = preset.0
                         prefs.themeColor2 = preset.1
                         prefs.accent = "custom"
@@ -113,15 +127,24 @@ struct ThemePicker: View {
                 .padding(.top, 8)
                 // One dot, or two for a gradient.
                 HStack(spacing: 14) {
-                    Button { prefs.themeColor2 = -1 } label: { Image(systemName: "minus") }
+                    Button {
+                        if prefs.themeColor3 >= 0 { prefs.themeColor3 = -1 } else { prefs.themeColor2 = -1 }
+                    } label: { Image(systemName: "minus") }
                         .disabled(prefs.themeColor2 < 0)
                     Button {
-                        // The second colour starts as the first one's opposite.
-                        prefs.themeColor2 = Self.color(at: Self.opposite(Self.position(of: prefs.customAccent)))
+                        let first = Self.position(of: prefs.customAccent)
+                        if prefs.themeColor2 < 0 {
+                            // The second colour starts as the first one's opposite.
+                            prefs.themeColor2 = Self.color(at: Self.opposite(first))
+                        } else {
+                            // The third starts a third of the way round from the first.
+                            let x = (first.x + 1.0 / 3).truncatingRemainder(dividingBy: 1)
+                            prefs.themeColor3 = Self.color(at: CGPoint(x: x, y: first.y))
+                        }
                         prefs.accent = "custom"
                         prefs.wallpaper = "theme"
                     } label: { Image(systemName: "plus") }
-                        .disabled(prefs.themeColor2 >= 0)
+                        .disabled(prefs.themeColor2 >= 0 && prefs.themeColor3 >= 0)
                 }
                 .buttonStyle(.borderless)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
