@@ -419,7 +419,10 @@ func (a *App) handle(raw any) {
 		a.mu.Unlock()
 		go func() {
 			if settings, err := cli.TryFetchPrivacySettings(bg, false); err == nil {
+				a.log.Infof("privacy: read receipts are %q", settings.ReadReceipts)
 				a.setHideRead(settings.ReadReceipts == types.PrivacySettingNone)
+			} else {
+				a.log.Warnf("privacy settings could not be read: %v", err)
 			}
 			a.sendPresence(cli, available)
 			a.refreshGroups(cli)

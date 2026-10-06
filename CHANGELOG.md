@@ -2,6 +2,10 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.9.4
+
+- The log now records the read-receipt setting WhatsApp reports for the account, to make "why do I see blue ticks" answerable
+
 ## 0.9.3
 
 - The menu bar icon is drawn at its proper size again (it had shrunk into a corner in 0.9.1)
