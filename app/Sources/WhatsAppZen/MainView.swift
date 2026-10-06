@@ -223,8 +223,11 @@ struct Sidebar: View {
         let shown = store.chats.filter { chat in
             filter.includes(chat, lists: store.lists) && (query.isEmpty || chat.name.localizedCaseInsensitiveContains(query))
         }
-        // Pinned chats stay on top, each group still newest first.
-        return shown.filter(\.pinned) + shown.filter { !$0.pinned }
+        // Pinned chats stay on top, then chats with a message left half
+        // written, so it is not forgotten; each group still newest first.
+        func drafted(_ chat: Chat) -> Bool { chat.jid != store.selected && !(store.drafts[chat.jid] ?? "").isEmpty }
+        let rest = shown.filter { !$0.pinned }
+        return shown.filter(\.pinned) + rest.filter(drafted) + rest.filter { !drafted($0) }
     }
 
     var body: some View {
@@ -439,6 +442,9 @@ struct ChatView: View {
     /// WA_INFO (demo snapshots) starts with the info sheet open.
     @State private var showingInfo = ProcessInfo.processInfo.environment["WA_INFO"] != nil
     @State private var showingMembers = false
+    /// The messages picked while selecting several; nil when not selecting.
+    @State private var selection: Set<String>?
+    @State private var confirmDeleteSelected = false
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -474,13 +480,19 @@ struct ChatView: View {
                     } else if store.loaded {
                         NoMessagesNote().padding(.vertical, 40)
                     }
-                    MessageList(messages: store.messages, isGroup: chat.isGroup, highlighted: highlighted, unreadFrom: store.unreadFrom, actions: MessageActions(
+                    MessageList(messages: store.messages, isGroup: chat.isGroup, highlighted: highlighted, unreadFrom: store.unreadFrom,
+                                selection: selection, actions: MessageActions(
                         reply: { store.editing = nil; store.replyTo = $0 },
                         edit: { store.clearDraftState(); store.editing = $0; text = $0.text },
                         forward: { forwarding = $0 },
                         jump: { jump(to: $0, proxy: proxy) },
                         preview: { store.previewURL = URL(fileURLWithPath: $0) },
-                        view: { store.view($0) }
+                        view: { store.view($0) },
+                        select: { message in
+                            var chosen = selection ?? []
+                            if chosen.contains(message.id) { chosen.remove(message.id) } else { chosen.insert(message.id) }
+                            selection = chosen
+                        }
                     ))
                     Color.clear.frame(height: 1).id("bottom")
                 }
@@ -556,21 +568,25 @@ struct ChatView: View {
                         .padding(.trailing, 16)
                         .transition(.scale.combined(with: .opacity))
                     }
-                    ComposerBar(text: $text, reply: $store.replyTo, editing: $store.editing, image: $store.pendingImage,
-                                file: $store.pendingFile, chatName: chat.name, panelChat: chat, members: store.members,
-                                moreCount: store.pendingMore.count, onAttach: attach(_:),
-                                onEditLast: {
-                                    guard let last = store.messages.last(where: { $0.fromMe && $0.type == "text" && !$0.deleted }),
-                                          Date().timeIntervalSince(last.date) < 15 * 60 else { return }
-                                    store.clearDraftState()
-                                    store.editing = last
-                                    text = last.text
-                                },
-                                onVoice: { url, seconds in
-                                    store.send(voice: url, seconds: seconds, to: chat.jid, replyTo: store.replyTo?.id)
-                                    store.replyTo = nil
-                                },
-                                onTyping: { store.userIsTyping(in: chat.jid) }, onSend: send)
+                    if selection != nil {
+                        selectionBar
+                    } else {
+                        ComposerBar(text: $text, reply: $store.replyTo, editing: $store.editing, image: $store.pendingImage,
+                                    file: $store.pendingFile, chatName: chat.name, panelChat: chat, members: store.members,
+                                    moreCount: store.pendingMore.count, onAttach: attach(_:),
+                                    onEditLast: {
+                                        guard let last = store.messages.last(where: { $0.fromMe && $0.type == "text" && !$0.deleted }),
+                                              Date().timeIntervalSince(last.date) < 15 * 60 else { return }
+                                        store.clearDraftState()
+                                        store.editing = last
+                                        text = last.text
+                                    },
+                                    onVoice: { url, seconds in
+                                        store.send(voice: url, seconds: seconds, to: chat.jid, replyTo: store.replyTo?.id)
+                                        store.replyTo = nil
+                                    },
+                                    onTyping: { store.userIsTyping(in: chat.jid) }, onSend: send)
+                    }
                 }
             }
         }
@@ -626,6 +642,7 @@ struct ChatView: View {
             PhotoSendSheet(chat: chat)
         }
         .onAppear { text = store.drafts[chat.jid] ?? "" }
+        .onChange(of: chat.jid) { _, _ in selection = nil }
         // The view itself is kept when the chat changes: replacing it made
         // the split view lay its columns out again on every click, which
         // showed as the chat list shrinking and growing.
@@ -679,11 +696,59 @@ struct ChatView: View {
     }
 
     private func jump(to id: String, proxy: ScrollViewProxy) {
-        guard store.messages.contains(where: { $0.id == id }) else { return }
+        guard store.messages.contains(where: { $0.id == id }) else {
+            // Further back than what is loaded: bring it in, then come back here.
+            store.reveal(id: id, in: chat.jid)
+            return
+        }
         withAnimation { proxy.scrollTo(id, anchor: .center) }
-        highlighted = id
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            if highlighted == id { withAnimation { highlighted = nil } }
+        // Lazy rows above may not have their real height yet; land again once they do.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { proxy.scrollTo(id, anchor: .center) }
+        withAnimation(.easeOut(duration: 0.2)) { highlighted = id }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+            if highlighted == id { withAnimation(.easeOut(duration: 0.5)) { highlighted = nil } }
+        }
+    }
+
+    /// The picked messages as text, oldest first, each with who and when.
+    private func copySelected() {
+        let picked = store.messages.filter { selection?.contains($0.id) == true }
+        guard !picked.isEmpty else { return }
+        let stamp = DateFormatter()
+        stamp.dateFormat = "HH:mm, d.MM.yyyy"
+        let text = picked.count == 1 ? picked[0].plainText : picked.map { message in
+            let who = message.fromMe ? L("You") : (message.senderName.isEmpty ? chat.name : message.senderName)
+            return "[\(stamp.string(from: message.date))] \(who): \(message.plainText)"
+        }.joined(separator: "\n")
+        MessageRow.copy(text: text)
+        selection = nil
+    }
+
+    private var selectionBar: some View {
+        HStack(spacing: 10) {
+            Button { selection = nil } label: { Image(systemName: "xmark").frame(width: 20, height: 20) }
+                .buttonStyle(.glass).buttonBorderShape(.circle)
+                .keyboardShortcut(.cancelAction)
+                .help(L("Cancel"))
+            Text(L("%lld selected", selection?.count ?? 0)).fontWeight(.medium)
+            Spacer()
+            Button(L("Copy"), systemImage: "doc.on.doc", action: copySelected)
+                .keyboardShortcut("c")
+            Button(L("Delete for Me"), systemImage: "trash", role: .destructive) { confirmDeleteSelected = true }
+        }
+        .buttonStyle(.glass)
+        .disabled(false)
+        .padding(.horizontal, 14)
+        .frame(height: 48)
+        .glassEffect(.regular, in: Capsule())
+        .padding(.horizontal, 14)
+        .padding(.bottom, 12)
+        .padding(.top, 4)
+        .confirmationDialog(L("Delete the selected messages?"), isPresented: $confirmDeleteSelected) {
+            Button(L("Delete for Me"), role: .destructive) {
+                for message in store.messages where selection?.contains(message.id) == true { store.deleteForMe(message) }
+                selection = nil
+            }
         }
     }
 

@@ -426,3 +426,7 @@
 "Not allowed" = "Nicht erlaubt";
 "Not asked yet" = "Noch nicht gefragt";
 "Change…" = "Ändern …";
+"Select Messages" = "Nachrichten auswählen";
+"Delete the selected messages?" = "Ausgewählte Nachrichten löschen?";
+"Downloading %@ of %@" = "Laden: %@ von %@";
+"That message is not on this Mac. Use \"Get older messages from your phone\" at the top of the chat to bring earlier ones." = "Diese Nachricht ist nicht auf diesem Mac. Mit „Ältere Nachrichten vom Telefon laden“ oben im Chat holen Sie frühere.";

@@ -426,3 +426,7 @@
 "Not allowed" = "İzin yok";
 "Not asked yet" = "Henüz sorulmadı";
 "Change…" = "Değiştir…";
+"Select Messages" = "Mesajları Seç";
+"Delete the selected messages?" = "Seçili mesajlar silinsin mi?";
+"Downloading %@ of %@" = "İndiriliyor: %@ / %@";
+"That message is not on this Mac. Use \"Get older messages from your phone\" at the top of the chat to bring earlier ones." = "Bu mesaj bu Mac'te yok. Daha eskileri getirmek için sohbetin tepesindeki \"Eski mesajları telefondan getir\" düğmesini kullanın.";

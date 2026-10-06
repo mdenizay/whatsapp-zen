@@ -14,6 +14,8 @@ struct MessageActions {
     var preview: (String) -> Void = { NSWorkspace.shared.open(URL(fileURLWithPath: $0)) }
     /// Opens a photo or video in the in-app viewer.
     var view: ((Message) -> Void)?
+    /// Picks or unpicks a message while several are being selected.
+    var select: ((Message) -> Void)?
 }
 
 extension MessageRow: Equatable {
@@ -22,7 +24,7 @@ extension MessageRow: Equatable {
     /// (a typing indicator, a presence update, another chat's message).
     static func == (a: MessageRow, b: MessageRow) -> Bool {
         a.message == b.message && a.showSender == b.showSender && a.endsGroup == b.endsGroup
-            && a.highlighted == b.highlighted && a.maxWidth == b.maxWidth
+            && a.highlighted == b.highlighted && a.maxWidth == b.maxWidth && a.selected == b.selected
     }
 }
 
@@ -34,6 +36,8 @@ struct MessageRow: View {
     /// Last bubble of a run from the same sender; it gets the "tail" corner.
     let endsGroup: Bool
     let highlighted: Bool
+    /// Whether this message is picked, while several are being selected; nil otherwise.
+    var selected: Bool?
     var maxWidth: CGFloat = 520
     let actions: MessageActions
 
@@ -65,6 +69,11 @@ struct MessageRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 6) {
+            if let selected {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(selected ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.tertiary))
+            }
             if mine {
                 Spacer(minLength: 36)
                 hoverActions
@@ -80,7 +89,14 @@ struct MessageRow: View {
         }
         .padding(.top, showSender ? (prefs.compact ? 3 : 6) : 0)
         .padding(.bottom, endsGroup ? (prefs.compact ? 3 : 6) : 0)
-        .background(highlighted ? Theme.accent.opacity(0.16) : .clear, in: RoundedRectangle(cornerRadius: 12))
+        .background(highlighted ? Theme.accent.opacity(0.32) : (selected == true ? Theme.accent.opacity(0.14) : .clear),
+                    in: RoundedRectangle(cornerRadius: 12))
+        // While selecting, a click anywhere on the row picks it.
+        .overlay {
+            if selected != nil {
+                Color.clear.contentShape(Rectangle()).onTapGesture { actions.select?(message) }
+            }
+        }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
             if !message.deleted { actions.reply(message) }
@@ -306,6 +322,9 @@ struct MessageRow: View {
                         if await !Downloads.saveAs(message) { store.errorText = L("Download failed") }
                     }
                 }
+            }
+            if let select = actions.select {
+                Button(L("Select Messages"), systemImage: "checkmark.circle") { select(message) }
             }
             Menu(L("React"), systemImage: "face.smiling") {
                 ForEach(quickReactions, id: \.self) { emoji in
@@ -575,6 +594,8 @@ struct FileAttachmentView: View {
     @State private var saving = false
     /// Where "save to Downloads" put the file.
     @State private var saved: URL?
+    @ObservedObject private var progress = DownloadProgress.shared
+    private var downloading: DownloadProgress.State? { progress.active[message.id] }
 
     private var isVideo: Bool { message.type == "video" }
     /// Downloading, or still uploading our own file.
@@ -616,7 +637,9 @@ struct FileAttachmentView: View {
                     .overlay {
                         ZStack {
                             Circle().fill(.black.opacity(0.5)).frame(width: 52, height: 52)
-                            if working {
+                            if let downloading {
+                                ProgressRing(fraction: downloading.fraction, color: .white)
+                            } else if working {
                                 ProgressView().controlSize(.small).tint(.white)
                             } else {
                                 Image(systemName: failed ? "exclamationmark.triangle.fill" : "play.fill")
@@ -629,7 +652,9 @@ struct FileAttachmentView: View {
                     ZStack {
                         RoundedRectangle(cornerRadius: 9, style: .continuous)
                             .fill(onBubble ? .white.opacity(0.22) : Theme.accent.opacity(0.18))
-                        if working {
+                        if let downloading {
+                            ProgressRing(fraction: downloading.fraction, color: onBubble ? .white : Theme.accent)
+                        } else if working {
                             ProgressView().controlSize(.small)
                         } else {
                             Image(systemName: isVideo ? "play.fill" : "doc.fill")
@@ -639,7 +664,9 @@ struct FileAttachmentView: View {
                     .frame(width: 36, height: 36)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(isVideo ? L("Video") : (message.fileName ?? L("Document"))).lineLimit(1).truncationMode(.middle)
-                        Text(failed ? L("Download failed") : (saved != nil ? L("Saved to Downloads") : L("Click to open"))).font(.caption)
+                        Text(failed ? L("Download failed")
+                            : (downloading.map { L("Downloading %@ of %@", DownloadProgress.size($0.done), DownloadProgress.size($0.total)) }
+                                ?? (saved != nil ? L("Saved to Downloads") : L("Click to open")))).font(.caption).monospacedDigit()
                             .foregroundStyle(onBubble ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(.secondary))
                     }
                 }
@@ -735,6 +762,8 @@ struct MessageList: View {
     var highlighted: String?
     /// The first message that was unread when the chat was opened.
     var unreadFrom: String?
+    /// The picked messages while several are being selected; nil otherwise.
+    var selection: Set<String>?
     var maxWidth: CGFloat = 520
     let actions: MessageActions
 
@@ -759,6 +788,7 @@ struct MessageList: View {
                 showSender: isGroup && !message.fromMe && (newDay || previous?.sender != message.sender),
                 endsGroup: nextDay || next?.sender != message.sender,
                 highlighted: highlighted == message.id,
+                selected: selection.map { $0.contains(message.id) },
                 maxWidth: maxWidth,
                 actions: actions
             )
@@ -794,5 +824,45 @@ struct NoMessagesNote: View {
         }
         .frame(maxWidth: 260)
         .frame(maxWidth: .infinity)
+    }
+}
+
+/// How far the downloads of large files are, fed by the core. Kept apart from
+/// the store so that a progress tick redraws the file's row and nothing else.
+final class DownloadProgress: ObservableObject {
+    static let shared = DownloadProgress()
+
+    struct State {
+        let done: Int
+        let total: Int
+        var fraction: Double { total > 0 ? min(Double(done) / Double(total), 1) : 0 }
+    }
+
+    /// Message id → progress, for downloads under way.
+    @Published private(set) var active: [String: State] = [:]
+
+    func update(id: String, done: Int, total: Int, finished: Bool) {
+        active[id] = finished ? nil : State(done: done, total: total)
+    }
+
+    static func size(_ bytes: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+}
+
+/// A small ring that fills as a download comes in.
+struct ProgressRing: View {
+    let fraction: Double
+    let color: Color
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(color.opacity(0.25), lineWidth: 3)
+            Circle().trim(from: 0, to: max(fraction, 0.02))
+                .stroke(color, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: 20, height: 20)
+        .animation(.linear(duration: 0.25), value: fraction)
     }
 }

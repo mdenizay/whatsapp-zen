@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.mau.fi/whatsmeow"
@@ -90,6 +92,12 @@ func (a *App) dispatch(r *Req) (any, error) {
 		return a.search(r.Chat, r.Text)
 	case "delete_for_me":
 		return nil, a.deleteForMe(r.Chat, r.ID)
+	case "count_from":
+		// How many messages a chat has from the given one onward; 0 if this
+		// Mac does not have that message.
+		var n int
+		err := a.db.QueryRow(`SELECT COUNT(*) FROM messages WHERE chat=?1 AND ts >= (SELECT ts FROM messages WHERE chat=?1 AND id=?2)`, r.Chat, r.ID).Scan(&n)
+		return n, err
 	case "fetch_history":
 		return a.fetchHistory(r.Chat)
 	case "count_since":
@@ -522,9 +530,23 @@ func (a *App) download(chat, id string) (string, error) {
 	if err := proto.Unmarshal(raw, &msg); err != nil {
 		return "", err
 	}
-	data, err := cli.DownloadAny(bg, &msg)
-	if err != nil {
-		return "", err
+	var (
+		media whatsmeow.DownloadableMessage
+		total uint64
+	)
+	switch {
+	case msg.ImageMessage != nil:
+		media, total = msg.ImageMessage, msg.ImageMessage.GetFileLength()
+	case msg.VideoMessage != nil:
+		media, total = msg.VideoMessage, msg.VideoMessage.GetFileLength()
+	case msg.AudioMessage != nil:
+		media, total = msg.AudioMessage, msg.AudioMessage.GetFileLength()
+	case msg.DocumentMessage != nil:
+		media, total = msg.DocumentMessage, msg.DocumentMessage.GetFileLength()
+	case msg.StickerMessage != nil:
+		media, total = msg.StickerMessage, msg.StickerMessage.GetFileLength()
+	default:
+		return "", whatsmeow.ErrNothingDownloadableFound
 	}
 	ext := map[string]string{"image": ".jpg", "video": ".mp4", "audio": ".ogg", "sticker": ".webp"}[typ]
 	if typ == "document" {
@@ -534,9 +556,82 @@ func (a *App) download(chat, id string) (string, error) {
 		ext = ".png"
 	}
 	path := filepath.Join(a.dir, "media", safeName(id)+ext)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+
+	// One download per message, however many views ask for it at once.
+	key := a.id + "/" + id
+	downloadsMu.Lock()
+	if wait, busy := downloads[key]; busy {
+		downloadsMu.Unlock()
+		<-wait
+		if _, err := os.Stat(path); err != nil {
+			return "", errors.New("download failed")
+		}
+		return path, nil
+	}
+	done := make(chan struct{})
+	downloads[key] = done
+	downloadsMu.Unlock()
+	defer func() {
+		downloadsMu.Lock()
+		delete(downloads, key)
+		downloadsMu.Unlock()
+		close(done)
+	}()
+
+	// Straight to disk, never whole in memory; a large file reports how far it is.
+	part := path + ".part"
+	f, err := os.OpenFile(part, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return "", err
+	}
+	file := &countingFile{File: f}
+	stop := make(chan struct{})
+	if total > 512<<10 {
+		go func() {
+			tick := time.NewTicker(250 * time.Millisecond)
+			defer tick.Stop()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-tick.C:
+					a.emit(map[string]any{"type": "download", "chat": chat, "id": id, "done": min(file.written.Load(), int64(total)), "total": total})
+				}
+			}
+		}()
+	}
+	err = cli.DownloadToFile(bg, media, file)
+	close(stop)
+	f.Close()
+	if total > 512<<10 {
+		// Tells the views the bar can go, whether or not it worked.
+		a.emit(map[string]any{"type": "download", "chat": chat, "id": id, "done": total, "total": total, "finished": true})
+	}
+	if err != nil {
+		os.Remove(part)
+		return "", err
+	}
+	if err := os.Rename(part, path); err != nil {
 		return "", err
 	}
 	a.db.Exec(`UPDATE messages SET media_path=? WHERE chat=? AND id=?`, path, chat, id)
 	return path, nil
+}
+
+var (
+	downloadsMu sync.Mutex
+	downloads   = map[string]chan struct{}{}
+)
+
+// countingFile counts what is written sequentially (the download itself; the
+// decryption that follows rewrites in place and is not progress).
+type countingFile struct {
+	*os.File
+	written atomic.Int64
+}
+
+func (c *countingFile) Write(p []byte) (int, error) {
+	n, err := c.File.Write(p)
+	c.written.Add(int64(n))
+	return n, err
 }

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.mau.fi/whatsmeow"
@@ -39,6 +40,10 @@ type App struct {
 	names     map[string]string
 
 	avatarSem chan struct{}
+
+	// The user's own read receipts are off. WhatsApp then shows them nobody
+	// else's either, so neither does this app.
+	hideRead atomic.Bool
 }
 
 var bg = context.Background()
@@ -413,10 +418,17 @@ func (a *App) handle(raw any) {
 		available := a.available
 		a.mu.Unlock()
 		go func() {
+			if settings, err := cli.TryFetchPrivacySettings(bg, false); err == nil {
+				a.setHideRead(settings.ReadReceipts == types.PrivacySettingNone)
+			}
 			a.sendPresence(cli, available)
 			a.refreshGroups(cli)
 			a.resyncSettings(cli)
 		}()
+	case *events.PrivacySettings:
+		if evt.ReadReceiptsChanged {
+			a.setHideRead(evt.NewSettings.ReadReceipts == types.PrivacySettingNone)
+		}
 	case *events.Disconnected:
 		a.mu.Lock()
 		was := a.state
@@ -711,9 +723,27 @@ func (a *App) onMessage(evt *events.Message) {
 	})
 }
 
+// setHideRead records whether the user's read receipts are off. Turning them
+// off also takes back the blue ticks already shown in one-to-one chats, as
+// the phone does; groups always show them.
+func (a *App) setHideRead(off bool) {
+	a.hideRead.Store(off)
+	if !off {
+		return
+	}
+	if res, err := a.db.Exec(`UPDATE messages SET status=? WHERE status=? AND from_me=1 AND chat NOT LIKE '%@g.us'`, statusDelivered, statusRead); err == nil {
+		if n, _ := res.RowsAffected(); n > 0 {
+			a.emit(map[string]any{"type": "messages", "chat": ""})
+			a.emit(map[string]any{"type": "chats"})
+		}
+	}
+}
+
 func (a *App) onReceipt(evt *events.Receipt) {
 	chat := a.pn(evt.Chat).String()
-	isRead := evt.Type == types.ReceiptTypeRead || evt.Type == types.ReceiptTypeReadSelf || evt.Type == types.ReceiptTypePlayed
+	// "Played" (a voice message was listened to) is sent whatever the other
+	// side's read-receipt setting, and is not a blue tick.
+	isRead := evt.Type == types.ReceiptTypeRead || evt.Type == types.ReceiptTypeReadSelf
 	if evt.IsFromMe || evt.Type == types.ReceiptTypeReadSelf {
 		// Our own receipt from another device: we read this chat elsewhere.
 		if isRead {
@@ -722,9 +752,9 @@ func (a *App) onReceipt(evt *events.Receipt) {
 		return
 	}
 	st := statusDelivered
-	if isRead {
+	if isRead && !(a.hideRead.Load() && evt.Chat.Server != types.GroupServer) {
 		st = statusRead
-	} else if evt.Type != types.ReceiptTypeDelivered {
+	} else if !isRead && evt.Type != types.ReceiptTypeDelivered && evt.Type != types.ReceiptTypePlayed {
 		return
 	}
 	changed := int64(0)

@@ -202,6 +202,11 @@ final class AppStore: ObservableObject, Identifiable {
         case "typing":
             guard let chat = obj["chat"] as? String else { return }
             setTyping(chat: chat, name: (obj["composing"] as? Bool ?? false) ? (obj["sender"] as? String ?? "") : nil)
+        case "download":
+            if let id = obj["id"] as? String {
+                DownloadProgress.shared.update(id: id, done: obj["done"] as? Int ?? 0, total: obj["total"] as? Int ?? 0,
+                                               finished: obj["finished"] as? Bool ?? false)
+            }
         case "avatar":
             if let jid = obj["jid"] as? String { Task { @MainActor in Images.forgetAvatar(jid) } }
             avatarTick += 1
@@ -519,6 +524,26 @@ final class AppStore: ObservableObject, Identifiable {
             // Let the list lay out the newly loaded rows before scrolling.
             try? await Task.sleep(for: .milliseconds(150))
             self.jumpTarget = message.id
+        }
+    }
+
+    /// Shows a message known only by its id (the one a reply quotes), loading
+    /// the conversation back to it if it is older than what is on screen.
+    func reveal(id: String, in chat: String) {
+        guard chat == selected else { return }
+        Task { @MainActor in
+            let from: Int = (try? await Core.call("count_from", ["chat": chat, "id": id], account: self.id)) ?? 0
+            guard from > 0 else {
+                self.errorText = L("That message is not on this Mac. Use \"Get older messages from your phone\" at the top of the chat to bring earlier ones.")
+                return
+            }
+            let limit = min(from + 20, Self.maxLoaded)
+            guard let list = await self.fetchMessages(chat: chat, limit: limit), chat == self.selected else { return }
+            self.messages = list
+            self.hasMore = list.count >= limit
+            // Let the list lay out the newly loaded rows before scrolling.
+            try? await Task.sleep(for: .milliseconds(200))
+            self.jumpTarget = id
         }
     }
 

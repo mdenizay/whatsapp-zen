@@ -241,9 +241,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         func bitmap(tint: NSColor?) -> NSImage? {
             // 3× covers every display the menu bar can be on.
             guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 51, pixelsHigh: 51, bitsPerSample: 8, samplesPerPixel: 4,
-                                             hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
-                  let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
+                                             hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+            // Before the context is made: it takes its scale from the size in
+            // points, and without it the glyph lands in a corner at a third the size.
             rep.size = size
+            guard let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current = context
             let rect = NSRect(origin: .zero, size: size)

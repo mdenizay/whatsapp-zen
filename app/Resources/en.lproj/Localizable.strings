@@ -427,3 +427,7 @@
 "Not allowed" = "Not allowed";
 "Not asked yet" = "Not asked yet";
 "Change…" = "Change…";
+"Select Messages" = "Select Messages";
+"Delete the selected messages?" = "Delete the selected messages?";
+"Downloading %@ of %@" = "Downloading %@ of %@";
+"That message is not on this Mac. Use \"Get older messages from your phone\" at the top of the chat to bring earlier ones." = "That message is not on this Mac. Use \"Get older messages from your phone\" at the top of the chat to bring earlier ones.";

@@ -2,6 +2,15 @@
 
 The section for the running version is shown in the app after an update.
 
+## 0.9.3
+
+- The menu bar icon is drawn at its proper size again (it had shrunk into a corner in 0.9.1)
+- Select several messages: "Select Messages" in a message's menu, click the ones you want, then copy them together (each with who and when) or delete them for yourself
+- Clicking the quoted message in a reply goes to the original, loading the conversation back to it if needed, and marks it clearly
+- A chat with a message left half written moves to the top of the list, under the pinned ones
+- Large files show how far the download is, and are saved straight to disk instead of being held in memory
+- With your read receipts off, one-to-one chats no longer show others' blue ticks, as on the phone (groups still do); a voice message being played no longer counts as read
+
 ## 0.9.2
 
 - Notifications: choose what a banner shows (name and message, name only, or nothing) and whether it carries the profile photo, with a preview of the result

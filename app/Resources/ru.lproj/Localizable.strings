@@ -426,3 +426,7 @@
 "Not allowed" = "Запрещено";
 "Not asked yet" = "Ещё не запрошено";
 "Change…" = "Изменить…";
+"Select Messages" = "Выбрать сообщения";
+"Delete the selected messages?" = "Удалить выбранные сообщения?";
+"Downloading %@ of %@" = "Загрузка: %@ из %@";
+"That message is not on this Mac. Use \"Get older messages from your phone\" at the top of the chat to bring earlier ones." = "Этого сообщения нет на этом Mac. Чтобы загрузить более ранние, используйте кнопку «Загрузить старые сообщения с телефона» вверху чата.";
