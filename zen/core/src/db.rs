@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS reactions(
 );
 CREATE TABLE IF NOT EXISTS names(jid TEXT PRIMARY KEY, name TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS contacts(jid TEXT PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS poll_votes(chat TEXT NOT NULL, msg_id TEXT NOT NULL, voter TEXT NOT NULL,
+    options TEXT NOT NULL, PRIMARY KEY(chat, msg_id, voter));
 ";
 
 /// Columns added after the first schema; each fails harmlessly when present.
@@ -136,6 +138,11 @@ pub struct Message {
     #[serde(skip_serializing_if = "String::is_empty")]
     pub link_desc: String,
     pub mentions_me: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub poll: Option<serde_json::Value>,
+    /// The poll's definition as stored: options, how many may be chosen, its secret.
+    #[serde(skip)]
+    pub poll_raw: String,
     pub reactions: Vec<Reaction>,
 }
 
@@ -159,9 +166,18 @@ pub struct NewMessage {
     pub quoted_sender: String,
     pub status: i32,
     pub unread: bool,
+    pub link_title: String,
+    pub link_desc: String,
+    /// A poll's definition as JSON; empty for anything else.
+    pub poll: String,
+    pub mentions_me: bool,
+    /// When a disappearing message goes, in seconds since 1970; 0 for never.
+    pub expires_at: i64,
+    /// Who the text mentions, as the protocol names them. Not stored.
+    pub mentioned: Vec<String>,
 }
 
-const MSG_COLS: &str = "id,chat,sender,from_me,ts,type,text,thumb,media_path,file_name,w,h,quoted_id,quoted_text,quoted_sender,status,edited,deleted,starred,pinned,link_title,link_desc,mentions_me";
+const MSG_COLS: &str = "id,chat,sender,from_me,ts,type,text,thumb,media_path,file_name,w,h,quoted_id,quoted_text,quoted_sender,status,edited,deleted,starred,pinned,link_title,link_desc,mentions_me,poll";
 
 pub struct Db {
     conn: Mutex<Connection>,
@@ -266,6 +282,38 @@ impl Db {
                 message.quoted_sender = name_of(&conn, &message.quoted_sender);
             }
         }
+        // Polls: their options, and the tally of the votes seen so far.
+        for message in &mut list {
+            if message.poll_raw.is_empty() {
+                continue;
+            }
+            let Ok(def) = serde_json::from_str::<serde_json::Value>(&message.poll_raw) else { continue };
+            let names: Vec<String> = def["options"].as_array().map(|a| a.iter().filter_map(|o| o.as_str().map(String::from)).collect()).unwrap_or_default();
+            let mut votes = vec![0u32; names.len()];
+            let mut mine = vec![false; names.len()];
+            let mut voters = 0;
+            if let Ok(mut stmt) = conn.prepare_cached("SELECT voter, options FROM poll_votes WHERE chat=?1 AND msg_id=?2") {
+                let cast: Vec<(String, String)> = stmt.query_map(params![message.chat, message.id], |r| Ok((r.get(0)?, r.get(1)?))).map(|rows| rows.flatten().collect()).unwrap_or_default();
+                for (voter, raw) in cast {
+                    let chosen: Vec<String> = serde_json::from_str(&raw).unwrap_or_default();
+                    if chosen.is_empty() {
+                        continue;
+                    }
+                    voters += 1;
+                    for name in chosen {
+                        if let Some(i) = names.iter().position(|n| *n == name) {
+                            votes[i] += 1;
+                            mine[i] |= voter.is_empty();
+                        }
+                    }
+                }
+            }
+            message.poll = Some(serde_json::json!({
+                "options": names.iter().enumerate().map(|(i, name)| serde_json::json!({"name": name, "votes": votes[i], "mine": mine[i]})).collect::<Vec<_>>(),
+                "selectable": def["selectable"].as_u64().unwrap_or(1),
+                "voters": voters,
+            }));
+        }
         // Reactions for the whole page in one query.
         let marks = vec!["?"; list.len()].join(",");
         let chat = list[0].chat.clone();
@@ -287,6 +335,8 @@ impl Db {
     /// One page in ascending order: the newest, or the one just older than
     /// (`before_ts`, `before_id`).
     pub fn messages(&self, chat: &str, before_ts: i64, before_id: &str, limit: i64) -> Vec<Message> {
+        // Disappearing messages whose time is up.
+        self.write(|w| w.exec("DELETE FROM messages WHERE expires_at > 0 AND expires_at < strftime('%s','now')", &[]));
         let limit = if limit <= 0 || limit > 200 { 50 } else { limit };
         let mut list = if before_ts > 0 {
             self.query("chat=?1 AND (ts,id) < (?2,?3) ORDER BY ts DESC, id DESC LIMIT ?4", &[&chat, &before_ts, &before_id, &limit])
@@ -378,6 +428,7 @@ fn message_from(r: &Row) -> rusqlite::Result<Message> {
         link_title: r.get(20)?,
         link_desc: r.get(21)?,
         mentions_me: r.get(22)?,
+        poll_raw: r.get(23)?,
         ..Default::default()
     })
 }
@@ -422,9 +473,11 @@ impl Writer<'_> {
     /// Adds a message; false if it was already there.
     pub fn insert_message(&self, m: &NewMessage) -> bool {
         self.exec(
-            "INSERT OR IGNORE INTO messages(chat,id,sender,from_me,ts,type,text,thumb,raw,file_name,w,h,quoted_id,quoted_text,quoted_sender,status,unread)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
-            params![m.chat, m.id, m.sender, m.from_me, m.ts, m.kind, m.text, m.thumb, m.raw, m.file_name, m.w, m.h, m.quoted_id, m.quoted_text, m.quoted_sender, m.status, m.unread],
+            "INSERT OR IGNORE INTO messages(chat,id,sender,from_me,ts,type,text,thumb,raw,file_name,w,h,quoted_id,quoted_text,quoted_sender,status,unread,
+                 link_title,link_desc,poll,mentions_me,expires_at)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)",
+            params![m.chat, m.id, m.sender, m.from_me, m.ts, m.kind, m.text, m.thumb, m.raw, m.file_name, m.w, m.h, m.quoted_id, m.quoted_text, m.quoted_sender, m.status, m.unread,
+                m.link_title, m.link_desc, m.poll, m.mentions_me, m.expires_at],
         ) > 0
     }
 

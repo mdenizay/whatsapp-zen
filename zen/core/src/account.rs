@@ -192,7 +192,7 @@ impl Account {
                 "SELECT COUNT(*) FROM messages WHERE chat=?1 AND ts >= (SELECT ts FROM messages WHERE chat=?1 AND id=?2)",
                 &[&r.chat, &r.id],
             ))),
-            "send_text" => self.send_text(&r.chat, &r.text, &r.reply_to),
+            "send_text" => self.send_text(&r.chat, &r.text, &r.reply_to, &r.mentions),
             "react" => self.react(&r.chat, &r.id, &r.emoji),
             "revoke" => self.revoke(&r.chat, &r.id),
             "edit" => self.edit(&r.chat, &r.id, &r.text),
@@ -203,26 +203,33 @@ impl Account {
             "mute" => self.mute(&r.chat, r.duration),
             "send_image" | "send_file" | "forward" | "pin_message" | "delete_for_me" | "fetch_history" | "group_info" | "group_update"
             | "group_rename" | "group_leave" | "group_link" | "typing" | "presence" | "subscribe" | "subscribe_presence" | "contacts"
-            | "start_chat" | "logout" | "block" | "cache_size" | "cache_list" | "cache_remove" | "clear_cache" | "reject_call" => self.more(r),
+            | "start_chat" | "logout" | "block" | "cache_size" | "cache_list" | "cache_remove" | "clear_cache" | "reject_call" | "set_ephemeral"
+            | "send_poll" | "vote" | "send_contact" | "send_location" | "chat_media" | "statuses" | "stickers" | "user_info" | "export" => self.more(r),
             "star" => self.star(&r.chat, &r.id, r.on),
             "mark_read" => {
                 self.mark_read(&r.chat);
                 Ok(Value::Null)
             }
             // Asked for constantly and harmless to leave for later.
-            "statuses" | "stickers" | "chat_media" => Ok(json!([])),
             other => Err(format!("\"{other}\" is not available in the Rust core yet")),
         }
     }
 
     /// Sends a text, quoting the message it answers.
-    fn send_text(self: &Arc<Self>, chat: &str, text: &str, reply_to: &str) -> Result<Value, String> {
+    fn send_text(self: &Arc<Self>, chat: &str, text: &str, reply_to: &str, mentions: &[String]) -> Result<Value, String> {
         let text = text.trim().to_string();
         if text.is_empty() {
             return Err("Empty message".into());
         }
         let mut row = self.new_row(chat, "text", &text)?;
-        let context = self.reply_context(&mut row, reply_to);
+        // Shown here with names; sent with the ids the protocol wants.
+        row.mentioned = mentions.to_vec();
+        self.rt.block_on(self.name_mentions(&mut row));
+        row.mentions_me = false;
+        let mut context = self.reply_context(&mut row, reply_to);
+        if !mentions.is_empty() {
+            context.get_or_insert_with(Default::default).mentioned_jid = mentions.to_vec();
+        }
         let message = match context {
             None => wa::Message::text(text),
             Some(context) => wa::Message {
@@ -527,6 +534,15 @@ impl Account {
             }
             return true;
         }
+        if let Some(pin) = base.pin_in_chat_message.as_option() {
+            use wa::message::pin_in_chat_message::Type;
+            if let Some(target) = pin.key.as_option().and_then(|key| key.id.as_deref()) {
+                let pinned = pin.r#type == Some(Type::PinForAll);
+                self.db.write(|w| w.exec("UPDATE messages SET pinned=?3 WHERE chat=?1 AND id=?2", &[&chat, &target, &pinned]));
+                self.send(json!({"type": "messages", "chat": chat}));
+            }
+            return true;
+        }
         if let Some(protocol) = base.protocol_message.as_option() {
             use wa::message::protocol_message::Type;
             let target = protocol.key.as_option().and_then(|key| key.id.clone()).unwrap_or_default();
@@ -577,7 +593,7 @@ impl Account {
                     } else {
                         source.chat.to_non_ad().to_string()
                     };
-                    if chat.ends_with("@broadcast") || chat.ends_with("@newsletter") {
+                    if (chat.ends_with("@broadcast") && chat != crate::commands::STATUS_CHAT) || chat.ends_with("@newsletter") {
                         continue;
                     }
                     let sender = if from_me {
@@ -591,16 +607,25 @@ impl Account {
                     if self.apply_side_effect(&chat, &sender, &inbound.message) {
                         continue;
                     }
+                    if self.apply_poll_vote(&chat, &sender, from_me, &inbound.message).await {
+                        continue;
+                    }
                     let Some(mut message) = row(&chat, info.id.as_ref(), &sender, from_me, info.timestamp.timestamp(), &inbound.message) else {
                         continue;
                     };
                     message.status = if from_me { status::SENT } else { 0 };
                     message.unread = !from_me;
+                    self.name_mentions(&mut message).await;
+                    // Statuses are kept for the status viewer, not as a chat.
+                    let is_status = chat == crate::commands::STATUS_CHAT;
                     let fresh = self.db.write(|w| {
                         if !from_me {
                             w.set_name(&sender, &info.push_name);
                         }
                         if !w.insert_message(&message) {
+                            return false;
+                        }
+                        if is_status {
                             return false;
                         }
                         w.touch_chat(&chat, message.ts);
@@ -775,10 +800,73 @@ pub(crate) fn row(chat: &str, id: &str, sender: &str, from_me: bool, ts: i64, me
         out.kind = "document".into();
         out.text = document.caption.clone().unwrap_or_default();
         out.file_name = document.file_name.clone().or_else(|| document.title.clone()).unwrap_or_default();
-    } else if base.sticker_message.is_set() {
+    } else if let Some(sticker) = base.sticker_message.as_option() {
+        context = sticker.context_info.as_option();
         out.kind = "sticker".into();
+        out.w = sticker.width.unwrap_or(0) as i64;
+        out.h = sticker.height.unwrap_or(0) as i64;
+    } else if let Some(video) = base.ptv_message.as_option() {
+        context = video.context_info.as_option();
+        out.kind = "video".into();
+        out.w = video.width.unwrap_or(0) as i64;
+        out.h = video.height.unwrap_or(0) as i64;
+        out.thumb = video.jpeg_thumbnail.as_ref().map(|t| t.to_vec());
+    } else if let Some(contact) = base.contact_message.as_option() {
+        out.kind = "other".into();
+        out.text = format!("👤 Contact: {}", contact.display_name.as_deref().unwrap_or(""));
+    } else if base.contacts_array_message.is_set() {
+        out.kind = "other".into();
+        out.text = "👤 Contacts".into();
+    } else if let Some(place) = base.location_message.as_option() {
+        out.kind = "other".into();
+        out.text = match place.name.as_deref().filter(|name| !name.is_empty()) {
+            Some(name) => format!("📍 Location: {name}"),
+            None => "📍 Location".into(),
+        };
+        out.text += &format!("\nhttps://maps.apple.com/?ll={:.6},{:.6}", place.degrees_latitude.unwrap_or(0.0), place.degrees_longitude.unwrap_or(0.0));
+    } else if base.live_location_message.is_set() {
+        out.kind = "other".into();
+        out.text = "📍 Live location".into();
+    } else if let Some(poll) = [&base.poll_creation_message, &base.poll_creation_message_v2, &base.poll_creation_message_v3].into_iter().find_map(|p| p.as_option()) {
+        context = poll.context_info.as_option();
+        out.kind = "poll".into();
+        out.text = poll.name.clone().unwrap_or_default();
+        let secret = message.message_context_info.as_option().and_then(|info| info.message_secret.as_ref()).map(|s| base64::Engine::encode(&base64::engine::general_purpose::STANDARD, s));
+        out.poll = json!({
+            "options": poll.options.iter().filter_map(|o| o.option_name.clone()).collect::<Vec<_>>(),
+            "selectable": poll.selectable_options_count.unwrap_or(0),
+            "secret": secret.unwrap_or_default(),
+        })
+        .to_string();
+    } else if let Some(event) = base.event_message.as_option() {
+        context = event.context_info.as_option();
+        out.kind = "other".into();
+        out.text = format!("📅 {}", event.name.as_deref().unwrap_or(""));
+        if let Some(description) = event.description.as_deref().filter(|d| !d.is_empty()) {
+            out.text += &format!("\n{description}");
+        }
+    } else if let Some(invite) = base.group_invite_message.as_option() {
+        out.kind = "other".into();
+        out.text = format!("✉️ Group invite: {}", invite.group_name.as_deref().unwrap_or(""));
+    } else if base.call.is_set() {
+        out.kind = "other".into();
+        out.text = "📞 Call".into();
     } else {
         return None;
+    }
+    // A link's title, description and picture, as the sender attached them.
+    if let Some(link) = base.extended_text_message.as_option().filter(|m| m.title.as_deref().is_some_and(|t| !t.is_empty())) {
+        out.link_title = link.title.clone().unwrap_or_default();
+        out.link_desc = link.description.clone().unwrap_or_default();
+        if let Some(thumb) = link.jpeg_thumbnail.as_ref().filter(|t| !t.is_empty()) {
+            out.thumb = Some(thumb.to_vec());
+        }
+    }
+    if let Some(context) = context {
+        if let Some(seconds) = context.expiration.filter(|s| *s > 0) {
+            out.expires_at = ts + seconds as i64;
+        }
+        out.mentioned = context.mentioned_jid.clone();
     }
     // The message a reply quotes.
     if let Some(context) = context {
@@ -793,7 +881,7 @@ pub(crate) fn row(chat: &str, id: &str, sender: &str, from_me: bool, ts: i64, me
         }
     }
     // Media keeps its protocol message: it holds the keys to download with.
-    if out.kind != "text" {
+    if matches!(out.kind.as_str(), "image" | "video" | "audio" | "document" | "sticker") {
         out.raw = Some(message.encode_to_vec());
     }
     Some(out)

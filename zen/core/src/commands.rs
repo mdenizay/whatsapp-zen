@@ -19,6 +19,9 @@ use crate::db::{status, NewMessage};
 
 const MAX_FILE: u64 = 100 << 20;
 
+/// Where status updates arrive; kept for the status viewer, not shown as a chat.
+pub(crate) const STATUS_CHAT: &str = "status@broadcast";
+
 fn jid(text: &str) -> Result<Jid, String> {
     text.parse().map_err(|_| "bad chat id".to_string())
 }
@@ -72,6 +75,12 @@ impl Account {
     {
         let client = self.client()?;
         let to = jid(&row.chat)?;
+        // A chat with a disappearing timer expects every message to carry it.
+        let timer = self.db.count("SELECT ephemeral FROM chats WHERE jid=?1", &[&row.chat]) as u32;
+        let mut row = row;
+        if timer > 0 {
+            row.expires_at = row.ts + timer as i64;
+        }
         self.db.write(|w| {
             w.insert_message(&row);
             w.touch_chat(&row.chat, row.ts);
@@ -90,7 +99,10 @@ impl Account {
                         let raw = message.encode_to_vec();
                         me.db.write(|w| w.exec("UPDATE messages SET raw=?3 WHERE chat=?1 AND id=?2", &[&row.chat, &row.id, &raw]));
                     }
-                    let options = SendOptions::default().with_message_id(row.id.clone());
+                    let mut options = SendOptions::default().with_message_id(row.id.clone());
+                    if timer > 0 {
+                        options.ephemeral_expiration = Some(timer);
+                    }
                     client.send_message_with_options(to, message, options).await.map(|_| ()).map_err(|e| e.to_string())
                 }
                 Err(error) => Err(error),
@@ -194,6 +206,59 @@ impl Account {
                 self.send(json!({"type": "messages", "chat": ""}));
                 Ok(Value::Null)
             }
+            "set_ephemeral" => self.set_ephemeral(&r.chat, r.duration.max(0) as u32),
+            "send_poll" => self.send_poll(&r.chat, &r.text, &r.options),
+            "vote" => self.vote(&r.chat, &r.id, &r.options),
+            "send_contact" => {
+                let name = if r.text.is_empty() { self.db.name_of(&r.jid) } else { r.text.clone() };
+                let user = jid(&r.jid)?.user.to_string();
+                let row = self.new_row(&r.chat, "other", &format!("👤 Contact: {name}"))?;
+                let message = wa::Message {
+                    contact_message: MessageField::some(wa::message::ContactMessage {
+                        display_name: Some(name.clone()),
+                        vcard: Some(format!("BEGIN:VCARD\nVERSION:3.0\nFN:{name}\nTEL;type=CELL;waid={user}:+{user}\nEND:VCARD")),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                };
+                self.deliver(row, move |_| async move { Ok(message) })
+            }
+            "send_location" => {
+                let row = self.new_row(&r.chat, "other", &format!("📍 Location\nhttps://maps.apple.com/?ll={:.6},{:.6}", r.lat, r.lng))?;
+                let message = wa::Message {
+                    location_message: MessageField::some(wa::message::LocationMessage {
+                        degrees_latitude: Some(r.lat),
+                        degrees_longitude: Some(r.lng),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                };
+                self.deliver(row, move |_| async move { Ok(message) })
+            }
+            "chat_media" => {
+                let which = match r.kind.as_str() {
+                    "docs" => "type='document'",
+                    "links" => "(text LIKE '%http://%' OR text LIKE '%https://%')",
+                    _ => "type IN ('image','video')",
+                };
+                serde_json::to_value(self.db.query(&format!("chat=?1 AND deleted=0 AND {which} ORDER BY ts DESC LIMIT 120"), &[&r.chat])).map_err(|e| e.to_string())
+            }
+            "statuses" => serde_json::to_value(self.db.query("chat=?1 AND deleted=0 AND ts > strftime('%s','now') - 86400 ORDER BY ts", &[&STATUS_CHAT]))
+                .map_err(|e| e.to_string()),
+            // Favourites (starred stickers) first, then the most recent.
+            "stickers" => serde_json::to_value(self.db.query(
+                "type='sticker' AND deleted=0 AND raw IS NOT NULL AND chat != ?1 ORDER BY starred DESC, ts DESC LIMIT 72",
+                &[&STATUS_CHAT],
+            ))
+            .map_err(|e| e.to_string()),
+            "user_info" => {
+                let client = self.client()?;
+                let who = jid(&r.jid)?;
+                let about = self.rt.block_on(client.contacts().get_user_info(&[who.clone()])).ok().and_then(|all| all.into_values().next()).and_then(|info| info.status);
+                let blocked = self.rt.block_on(client.blocking().is_blocked(&who)).unwrap_or(false);
+                Ok(json!({"about": about.unwrap_or_default(), "blocked": blocked}))
+            }
+            "export" => self.export(&r.chat, &r.path),
             "reject_call" => Err("Declining calls is not available in the Rust core yet".into()),
             other => Err(format!("\"{other}\" is not available in the Rust core yet")),
         }
@@ -522,6 +587,127 @@ impl Account {
         Ok(Value::String(chat))
     }
 
+    fn set_ephemeral(&self, chat: &str, seconds: u32) -> Result<Value, String> {
+        let client = self.client()?;
+        let target = jid(chat)?;
+        if chat.ends_with("@g.us") {
+            self.rt.block_on(client.groups().set_ephemeral(target, seconds)).map_err(|e| e.to_string())?;
+        } else {
+            self.rt.block_on(client.set_chat_disappearing_timer(target, seconds)).map_err(|e| e.to_string())?;
+        }
+        self.db.write(|w| w.exec("UPDATE chats SET ephemeral=?2 WHERE jid=?1", &[&chat, &seconds]));
+        self.send(json!({"type": "chats"}));
+        Ok(Value::Null)
+    }
+
+    fn send_poll(&self, chat: &str, name: &str, options: &[String]) -> Result<Value, String> {
+        if name.trim().is_empty() || options.len() < 2 {
+            return Err("A poll needs a question and at least two options".into());
+        }
+        let client = self.client()?;
+        let (sent, secret) = self.rt.block_on(client.polls().create(jid(chat)?, name, options, 1)).map_err(|e| e.to_string())?;
+        let id = sent.message_id.to_string();
+        let def = json!({"options": options, "selectable": 1, "secret": base64::engine::general_purpose::STANDARD.encode(secret)}).to_string();
+        let row = NewMessage { chat: chat.into(), id: id.clone(), from_me: true, ts: now(), kind: "poll".into(), text: name.into(), status: status::SENT, poll: def, ..Default::default() };
+        self.db.write(|w| {
+            w.insert_message(&row);
+            w.touch_chat(chat, row.ts);
+        });
+        self.changed(chat);
+        serde_json::to_value(self.db.message(chat, &id)).map_err(|e| e.to_string())
+    }
+
+    /// A stored poll: its options, its secret, and who made it.
+    fn poll(&self, chat: &str, id: &str) -> Option<(Vec<String>, Vec<u8>, String)> {
+        let (raw, sender, from_me) = self.db.get("SELECT poll, sender, from_me FROM messages WHERE chat=?1 AND id=?2", &[&chat, &id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, bool>(2)?))
+        })?;
+        let def: Value = serde_json::from_str(&raw).ok()?;
+        let options = def["options"].as_array()?.iter().filter_map(|o| o.as_str().map(String::from)).collect();
+        let secret = base64::engine::general_purpose::STANDARD.decode(def["secret"].as_str().unwrap_or("")).ok()?;
+        Some((options, secret, if from_me { self.me() } else { sender }))
+    }
+
+    fn save_vote(&self, chat: &str, id: &str, voter: &str, options: &[String]) {
+        let chosen = serde_json::to_string(options).unwrap_or_else(|_| "[]".into());
+        self.db.write(|w| {
+            w.exec(
+                "INSERT INTO poll_votes(chat,msg_id,voter,options) VALUES(?1,?2,?3,?4) ON CONFLICT(chat,msg_id,voter) DO UPDATE SET options=excluded.options",
+                &[&chat, &id, &voter, &chosen],
+            )
+        });
+        self.send(json!({"type": "messages", "chat": chat}));
+    }
+
+    /// Casts (or, with no options, withdraws) our vote in a poll.
+    fn vote(&self, chat: &str, id: &str, options: &[String]) -> Result<Value, String> {
+        let client = self.client()?;
+        let (_, secret, creator) = self.poll(chat, id).ok_or("not a poll")?;
+        if secret.is_empty() {
+            return Err("This poll's key was not received, so it cannot be voted on here".into());
+        }
+        self.rt.block_on(client.polls().vote(jid(chat)?, id, &jid(&creator)?, &secret, options)).map_err(|e| e.to_string())?;
+        self.save_vote(chat, id, "", options);
+        Ok(Value::Null)
+    }
+
+    /// Decrypts someone's vote; it names its choices by SHA-256 hash. True if
+    /// the message was a vote.
+    pub(crate) async fn apply_poll_vote(&self, chat: &str, sender: &str, from_me: bool, message: &wa::Message) -> bool {
+        use sha2::Digest as _;
+        let base = message.get_base_message();
+        let Some(update) = base.poll_update_message.as_option() else { return false };
+        let (Some(id), Some(vote)) = (update.poll_creation_message_key.as_option().and_then(|k| k.id.clone()), update.vote.as_option()) else { return true };
+        let (Some((options, secret, creator)), Ok(client)) = (self.poll(chat, &id), self.client()) else { return true };
+        let voter = if from_me { self.me() } else { sender.to_string() };
+        let (Ok(creator), Ok(voter_jid)) = (creator.parse::<Jid>(), voter.parse::<Jid>()) else { return true };
+        let ciphertext = whatsapp_rust::wacore::poll::PollVoteCiphertext {
+            enc_payload: vote.enc_payload.as_deref().unwrap_or(&[]),
+            enc_iv: vote.enc_iv.as_deref().unwrap_or(&[]),
+        };
+        let Ok(hashes) = client.polls().decrypt_vote(ciphertext, &secret, &id, &creator, &voter_jid).await else { return true };
+        let chosen: Vec<String> = options.into_iter().filter(|name| hashes.iter().any(|hash| hash.as_slice() == sha2::Sha256::digest(name.as_bytes()).as_slice())).collect();
+        self.save_vote(chat, &id, if from_me { "" } else { sender }, &chosen);
+        true
+    }
+
+    /// Rewrites the "@1234567890" tokens of a message into "@Name" and notes
+    /// whether the user is among them.
+    pub(crate) async fn name_mentions(&self, row: &mut NewMessage) {
+        if row.mentioned.is_empty() || row.text.is_empty() {
+            return;
+        }
+        let me = self.me();
+        for id in std::mem::take(&mut row.mentioned) {
+            let Ok(parsed) = id.parse::<Jid>() else { continue };
+            let who = self.pn(&parsed).await;
+            let name = if who == me {
+                row.mentions_me = true;
+                "You".to_string()
+            } else {
+                self.db.name_of(&who)
+            };
+            row.text = row.text.replace(&format!("@{}", parsed.user), &format!("@{name}"));
+        }
+    }
+
+    /// Writes a chat as plain text, oldest message first.
+    fn export(&self, chat: &str, path: &str) -> Result<Value, String> {
+        let mut out = String::new();
+        for message in self.db.query("chat=?1 AND deleted=0 ORDER BY ts, id", &[&chat]) {
+            let who = if message.from_me { "You".to_string() } else { message.sender_name.clone() };
+            let label = preview(&message.kind, "", &message.file_name);
+            let body = match message.kind.as_str() {
+                "text" | "other" | "poll" => message.text.clone(),
+                _ if message.text.is_empty() => label,
+                _ => format!("{label} {}", message.text),
+            };
+            out += &format!("[{}] {who}: {body}\n", stamp(message.ts));
+        }
+        std::fs::write(path, out).map_err(|e| e.to_string())?;
+        Ok(Value::Null)
+    }
+
     /// Events that are not messages: who is typing or online, and what the
     /// user's other devices changed.
     pub(crate) async fn handle_more(&self, event: &Event) {
@@ -634,6 +820,22 @@ pub(crate) fn preview(kind: &str, text: &str, file_name: &str) -> String {
         "document" => if file_name.is_empty() { "📄 Document".into() } else { format!("📄 {file_name}") },
         _ => text.to_string(),
     }
+}
+
+/// "2026-10-07 14:05" in UTC; the export's time stamps.
+fn stamp(ts: i64) -> String {
+    let days = ts.div_euclid(86400);
+    let secs = ts.rem_euclid(86400);
+    // Civil date from days since 1970 (Howard Hinnant's algorithm).
+    let z = days + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z.rem_euclid(146097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let (day, month) = (doy - (153 * mp + 2) / 5 + 1, if mp < 10 { mp + 3 } else { mp - 9 });
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02} {:02}:{:02}", secs / 3600, secs % 3600 / 60)
 }
 
 fn dir_size(dir: &std::path::Path) -> u64 {
