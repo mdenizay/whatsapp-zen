@@ -14,7 +14,11 @@ if [ "${CORE:-rust}" = "rust" ]; then
     if [ -x "$RUSTUP_BIN/cargo" ]; then
         export PATH="$RUSTUP_BIN:$PATH" RUSTUP_TOOLCHAIN=stable
     fi
-    (cd "$ROOT/zen" && MACOSX_DEPLOYMENT_TARGET=14.0 cargo build --release -p zen-core)
+    # Opus (the sound of some calls) is built from source into the library, so
+    # the app needs nothing installed; its build needs cmake, and a setting
+    # for its old CMake file.
+    (cd "$ROOT/zen" && MACOSX_DEPLOYMENT_TARGET=14.0 LIBOPUS_STATIC=1 LIBOPUS_NO_PKG=1 CMAKE_POLICY_VERSION_MINIMUM=3.5 \
+        cargo build --release -p zen-core)
     mkdir -p "$ROOT/core/build"
     cp "$ROOT/zen/target/release/libzen_core.a" "$ROOT/core/build/libwacore.a"
 else

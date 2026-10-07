@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use serde_json::{json, Value};
 use whatsapp_rust::prelude::*;
+use whatsapp_rust::voip::audio::WaOpusDecoder;
 use whatsapp_rust::voip::{CallEvent, CallHandle, VideoFrame, VideoUpgradeToken};
 use whatsapp_rust::wacore::types::call::VideoState;
 use whatsapp_rust::wacore::types::call::IncomingCall;
@@ -75,29 +76,76 @@ impl Drop for Audio {
 type Mic = async_channel::Receiver<Vec<i16>>;
 type Speaker = async_channel::Sender<Vec<i16>>;
 
+/// What the speaker has yet to play, and what has been heard so far.
+pub(crate) struct Playback {
+    /// Samples at 16 kHz, waiting for the sound device.
+    queue: Mutex<VecDeque<i16>>,
+    /// Sound frames are arriving: the call's media path is up. The library
+    /// hands out silence from the first moment, so this says nothing about
+    /// the other side having answered.
+    flowing: AtomicBool,
+    /// Something other than silence arrived: the other side is really there.
+    voiced: AtomicBool,
+    /// When sound last came in the other format (see `play_foreign`).
+    foreign: Mutex<Option<std::time::Instant>>,
+}
+
+impl Playback {
+    fn push(&self, samples: &[i16]) {
+        let mut queue = self.queue.lock().unwrap();
+        queue.extend(samples.iter().copied());
+        // Never more than a third of a second behind: old sound is dropped, not delayed.
+        let excess = queue.len().saturating_sub(RATE as usize / 3);
+        queue.drain(..excess);
+    }
+
+    /// A frame the library decoded itself.
+    fn play(&self, frame: &[i16]) {
+        self.flowing.store(true, Ordering::Relaxed);
+        if frame.iter().all(|&sample| sample == 0) {
+            // While the other side's sound comes as Opus the library keeps
+            // handing out silence at the same pace; played as well, it would
+            // cut the voice into pieces.
+            if self.foreign.lock().unwrap().is_some_and(|at| at.elapsed().as_millis() < 500) {
+                return;
+            }
+        } else {
+            self.voiced.store(true, Ordering::Relaxed);
+        }
+        self.push(frame);
+    }
+
+    /// Sound the other side sent as plain Opus, which phones do in video
+    /// calls among others; the library passes it on undecoded.
+    fn play_foreign(&self, samples: &[i16]) {
+        self.flowing.store(true, Ordering::Relaxed);
+        self.voiced.store(true, Ordering::Relaxed);
+        *self.foreign.lock().unwrap() = Some(std::time::Instant::now());
+        self.push(samples);
+    }
+}
+
 impl Audio {
     /// Opens the default microphone and speaker. Returns the two channel ends
-    /// the library wants, and a flag that turns true once the other side's
-    /// voice has arrived (the sign that the call is really connected).
-    fn open(rt: &tokio::runtime::Handle) -> Result<(Audio, Mic, Speaker, Arc<AtomicBool>), String> {
+    /// the library wants, and what is being played.
+    fn open(rt: &tokio::runtime::Handle) -> Result<(Audio, Mic, Speaker, Arc<Playback>), String> {
         let (mic_tx, mic_rx) = async_channel::bounded::<Vec<i16>>(3);
         let (speaker_tx, speaker_rx) = async_channel::bounded::<Vec<i16>>(8);
         let stop = Arc::new(AtomicBool::new(false));
-        let heard = Arc::new(AtomicBool::new(false));
-        // What the speaker has yet to play, at 16 kHz.
-        let pending: Arc<Mutex<VecDeque<i16>>> = Arc::new(Mutex::new(VecDeque::new()));
+        let playback = Arc::new(Playback {
+            queue: Mutex::new(VecDeque::new()),
+            flowing: AtomicBool::new(false),
+            voiced: AtomicBool::new(false),
+            foreign: Mutex::new(None),
+        });
 
-        let (queue, heard_flag) = (pending.clone(), heard.clone());
+        let incoming = playback.clone();
         rt.spawn(async move {
             while let Ok(frame) = speaker_rx.recv().await {
-                heard_flag.store(true, Ordering::Relaxed);
-                let mut queue = queue.lock().unwrap();
-                queue.extend(frame);
-                // Never more than a third of a second behind: old sound is dropped, not delayed.
-                let excess = queue.len().saturating_sub(RATE as usize / 3);
-                queue.drain(..excess);
+                incoming.play(&frame);
             }
         });
+        let pending = playback.clone();
 
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
         let stopping = stop.clone();
@@ -145,7 +193,7 @@ impl Audio {
                             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                                 let wanted = data.len() / out_channels;
                                 if ready.len() < wanted {
-                                    let mut queue = pending.lock().unwrap();
+                                    let mut queue = pending.queue.lock().unwrap();
                                     while ready.len() < wanted {
                                         let Some(sample) = queue.pop_front() else { break };
                                         up.push(sample as f32 / 32768.0, |out| ready.push_back(out));
@@ -179,7 +227,7 @@ impl Audio {
             })
             .map_err(|e| e.to_string())?;
         ready_rx.recv_timeout(std::time::Duration::from_secs(5)).map_err(|_| "The sound devices did not start".to_string())??;
-        Ok((Audio { stop }, mic_rx, speaker_tx, heard))
+        Ok((Audio { stop }, mic_rx, speaker_tx, playback))
     }
 }
 
@@ -229,7 +277,7 @@ impl Account {
                 if r.jid.ends_with("@g.us") {
                     return Err("Group calls are not available yet".into());
                 }
-                let (audio, mic, speaker, heard) = Audio::open(&self.rt)?;
+                let (audio, mic, speaker, playback) = Audio::open(&self.rt)?;
                 let call = client.voip();
                 let mut builder = call.call(&peer).audio(mic, speaker);
                 if r.video {
@@ -239,7 +287,7 @@ impl Account {
                 let handle = self.rt.block_on(builder.start()).map_err(|e| e.to_string())?;
                 let id = handle.call_id().to_string();
                 self.call_event(&id, &r.jid, "calling", json!({"incoming": false, "video": r.video}));
-                let video_request = self.watch_call(handle.clone(), id.clone(), r.jid.clone(), heard);
+                let video_request = self.watch_call(handle.clone(), id.clone(), r.jid.clone(), playback, false);
                 *self.call.lock().unwrap() = Some(ActiveCall { id: id.clone(), peer: r.jid.clone(), handle, _audio: audio, video_request });
                 Ok(json!({"id": id}))
             }
@@ -250,7 +298,7 @@ impl Account {
                 let client = self.client()?;
                 let incoming = self.ringing.lock().unwrap().remove(&r.id).ok_or("That call is no longer ringing")?;
                 let peer = self.rt.block_on(self.pn(&incoming.from));
-                let (audio, mic, speaker, heard) = Audio::open(&self.rt)?;
+                let (audio, mic, speaker, playback) = Audio::open(&self.rt)?;
                 let call = client.voip();
                 let mut builder = call.accept(&incoming).audio(mic, speaker);
                 if r.video {
@@ -259,7 +307,7 @@ impl Account {
                 }
                 let handle = self.rt.block_on(builder.start()).map_err(|e| e.to_string())?;
                 self.call_event(&r.id, &peer, "connecting", json!({"incoming": true, "video": r.video}));
-                let video_request = self.watch_call(handle.clone(), r.id.clone(), peer.clone(), heard);
+                let video_request = self.watch_call(handle.clone(), r.id.clone(), peer.clone(), playback, true);
                 *self.call.lock().unwrap() = Some(ActiveCall { id: r.id.clone(), peer, handle, _audio: audio, video_request });
                 Ok(Value::Null)
             }
@@ -306,16 +354,34 @@ impl Account {
         }
     }
 
-    /// Follows a call until it is over: reports when the other side's voice
-    /// first arrives, and lets go of the devices when the call ends, however
-    /// it ends.
-    fn watch_call(self: &Arc<Self>, handle: CallHandle, id: String, peer: String, heard: Arc<AtomicBool>) -> Arc<Mutex<Option<VideoUpgradeToken>>> {
+    /// Follows a call until it is over: reports when the two sides are really
+    /// talking, and lets go of the devices when the call ends, however it ends.
+    fn watch_call(self: &Arc<Self>, handle: CallHandle, id: String, peer: String, playback: Arc<Playback>, incoming: bool) -> Arc<Mutex<Option<VideoUpgradeToken>>> {
         let me = self.clone();
         let video_request: Arc<Mutex<Option<VideoUpgradeToken>>> = Arc::new(Mutex::new(None));
         // What the other side does with its camera.
         let (events, video_me, video_id, video_peer, pending) = (handle.events(), self.clone(), id.clone(), peer.clone(), video_request.clone());
+        let speaker = playback.clone();
         let video_watcher = self.rt.spawn(async move {
+            let mut opus = WaOpusDecoder::new().ok();
+            let mut foreign_frames = 0u64;
             while let Ok(event) = events.recv().await {
+                if let CallEvent::ForeignAudio(packet) = &event {
+                    foreign_frames += 1;
+                    if foreign_frames == 1 {
+                        log::info!("call: the other side sends Opus sound");
+                    }
+                    match opus.as_mut().map(|decoder| decoder.decode_mlow_escape(packet)) {
+                        Some(Ok(samples)) => speaker.play_foreign(samples),
+                        Some(Err(error)) if foreign_frames <= 3 => log::warn!("call: Opus sound could not be decoded: {error}"),
+                        _ => {}
+                    }
+                    continue;
+                }
+                if let CallEvent::AudioFormatMismatch { expected_rate, received_rates } = &event {
+                    log::warn!("call: sound format mismatch, expected {expected_rate}, offered {received_rates:?}");
+                    continue;
+                }
                 let CallEvent::VideoStateChanged { state, upgrade_token, .. } = event else { continue };
                 match state {
                     VideoState::UpgradeRequest | VideoState::UpgradeRequestV2 => {
@@ -331,10 +397,19 @@ impl Account {
                 }
             }
         });
-        let (connected_id, connected_peer, active) = (id.clone(), peer.clone(), heard);
+        let (connected_id, connected_peer, answer) = (id.clone(), peer.clone(), handle.clone());
         let connected = self.clone();
         let watcher = self.rt.spawn(async move {
-            while !active.load(Ordering::Relaxed) {
+            // A call we answered is on once sound flows. One we placed is on
+            // only when the other side picks up: the library learns which of
+            // their devices answered, or their voice arrives. Until then the
+            // sound that flows is the library's own silence.
+            let rang = answer.peer_jid();
+            loop {
+                let on = if incoming { playback.flowing.load(Ordering::Relaxed) } else { playback.voiced.load(Ordering::Relaxed) || answer.peer_jid() != rang };
+                if on {
+                    break;
+                }
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
             connected.call_event(&connected_id, &connected_peer, "active", json!({}));

@@ -449,3 +449,5 @@
 "Turn Camera On" = "Turn Camera On";
 "Video calls need the camera. Allow it in System Settings › Privacy & Security › Camera." = "Video calls need the camera. Allow it in System Settings › Privacy & Security › Camera.";
 "There is no call in progress" = "There is no call in progress";
+"Full Screen" = "Full Screen";
+"Exit Full Screen" = "Exit Full Screen";

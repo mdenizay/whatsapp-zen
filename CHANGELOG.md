@@ -2,6 +2,12 @@
 
 The section for the running version is shown in the app after an update.
 
+## 1.0.2
+
+- Calls: the other side's voice is now played when their phone sends it as Opus, as happens in video calls
+- Calls: the timer starts when the other side answers, not while it is still ringing
+- Video calls: the window can be resized and made full screen (the button, a double click or ⌃⌘F; Esc leaves it), with the controls on top of the picture
+
 ## 1.0.1
 
 - After updating to 1.0, contact names are taken over from the old engine's data, so chats show names straight away instead of phone numbers

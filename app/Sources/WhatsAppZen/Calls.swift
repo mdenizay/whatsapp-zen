@@ -34,7 +34,14 @@ final class CallCenter: ObservableObject {
     }
 
     @Published private(set) var call: Call?
+    /// The call window fills the screen.
+    @Published private(set) var fullScreen = false
     private var panel: NSPanel?
+    /// Where the window was before it filled the screen.
+    private var windowedFrame: NSRect?
+
+    private static let voiceSize = NSSize(width: 300, height: 150)
+    private static let videoSize = NSSize(width: 480, height: 400)
     private var ring: NSSound?
 
     private var store: AppStore? { AppModel.shared.accounts.first { $0.id == call?.account } }
@@ -210,6 +217,7 @@ final class CallCenter: ObservableObject {
         guard call != nil, call?.state != .ended else { return }
         call?.state = .ended
         let id = call?.id
+        exitFullScreen()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [self] in
             guard call?.id == id else { return }
             call = nil
@@ -218,10 +226,50 @@ final class CallCenter: ObservableObject {
         }
     }
 
-    /// The window grows to hold the pictures of a video call and shrinks back.
+    /// Fills the screen with a video call, or brings it back to its window.
+    /// The call window floats over other apps without taking their place, and
+    /// such a window cannot use the system's full screen; it covers the
+    /// screen it is on instead, menu bar included.
+    func toggleFullScreen() {
+        guard let panel else { return }
+        if fullScreen { return exitFullScreen() }
+        guard call?.showsVideo == true, let screen = panel.screen ?? NSScreen.main else { return }
+        windowedFrame = panel.frame
+        fullScreen = true
+        panel.level = .mainMenu + 1
+        panel.isMovableByWindowBackground = false
+        panel.setFrame(screen.frame, display: true, animate: true)
+        // So that Esc reaches it.
+        panel.makeKey()
+    }
+
+    func exitFullScreen() {
+        guard let panel, fullScreen else { return }
+        fullScreen = false
+        panel.level = .floating
+        panel.isMovableByWindowBackground = true
+        if let windowedFrame { panel.setFrame(windowedFrame, display: true, animate: true) }
+        windowedFrame = nil
+    }
+
+    /// The window grows to hold the pictures of a video call, where it can be
+    /// resized and made full screen, and shrinks back for a voice call.
     private func resize() {
         guard let panel, let call else { return }
-        let size = call.showsVideo ? NSSize(width: 380, height: 420) : NSSize(width: 300, height: 150)
+        // Video went away while full screen: come back first, then shrink.
+        if fullScreen {
+            guard !call.showsVideo else { return }
+            exitFullScreen()
+        }
+        let wasVideo = panel.styleMask.contains(.resizable)
+        guard wasVideo != call.showsVideo else { return }
+        if call.showsVideo {
+            panel.styleMask.insert(.resizable)
+            panel.minSize = NSSize(width: 320, height: 260)
+        } else {
+            panel.styleMask.remove(.resizable)
+        }
+        let size = call.showsVideo ? Self.videoSize : Self.voiceSize
         var frame = panel.frame
         // Keep the top right corner where it is.
         frame.origin.x += frame.width - size.width
@@ -232,7 +280,7 @@ final class CallCenter: ObservableObject {
 
     private func show() {
         if panel == nil {
-            let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 300, height: 150),
+            let panel = CallPanel(contentRect: NSRect(origin: .zero, size: Self.voiceSize),
                                 styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel, .hudWindow], backing: .buffered, defer: false)
             panel.titleVisibility = .hidden
             panel.titlebarAppearsTransparent = true
@@ -252,6 +300,14 @@ final class CallCenter: ObservableObject {
     }
 }
 
+/// The call window: it may take the keyboard (Esc, ⌃⌘F) and may cover the
+/// whole screen, menu bar included, which the system denies ordinary windows.
+final class CallPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
+}
+
 /// What the call window shows: who, what is happening, and the two or three
 /// things that can be done about it.
 struct CallView: View {
@@ -259,57 +315,102 @@ struct CallView: View {
 
     var body: some View {
         if let call = center.call {
-            VStack(spacing: 14) {
-                if call.showsVideo {
-                    ZStack(alignment: .bottomTrailing) {
-                        if call.remoteVideo {
-                            LayerView(layer: RemoteVideo.shared.layer)
-                        } else {
-                            Color.black
-                            Text(L("Waiting for video…")).font(.callout).foregroundStyle(.white.opacity(0.7))
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
-                        if call.camera {
-                            // Ourselves, small, in the corner.
-                            LayerView(layer: CallView.preview)
-                                .frame(width: 96, height: 72)
-                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(.white.opacity(0.5)))
-                                .padding(8)
-                        }
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .frame(maxHeight: .infinity)
+            if call.showsVideo, call.state != .ringing {
+                video(call)
+            } else {
+                voice(call)
+            }
+        }
+    }
+
+    /// A voice call, or one still ringing: who, what is happening, the buttons.
+    private func voice(_ call: CallCenter.Call) -> some View {
+        VStack(spacing: 14) {
+            if call.videoRequested {
+                Text(L("%@ wants to turn on video", call.name)).font(.callout).foregroundStyle(.secondary)
+            }
+            HStack(spacing: 12) {
+                AvatarView(jid: call.jid, name: call.name, size: 46)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(call.name).font(.headline).lineLimit(1)
+                    status(of: call).font(.callout).foregroundStyle(.secondary).monospacedDigit()
                 }
-                if call.videoRequested {
-                    Text(L("%@ wants to turn on video", call.name)).font(.callout).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 12) {
+                if call.state == .ringing {
+                    button("phone.down.fill", L("Decline"), .red, action: center.decline)
+                    button(call.videoOffer ? "video.fill" : "phone.fill", L("Accept"), .green, action: center.accept)
+                } else if call.state != .ended {
+                    iconButton(call.muted ? "mic.slash.fill" : "mic.fill", call.muted ? L("Unmute") : L("Mute"),
+                               call.muted ? .orange : .gray, action: center.toggleMute)
+                    iconButton(call.camera ? "video.fill" : "video.slash.fill", call.camera ? L("Turn Camera Off") : L("Turn Camera On"),
+                               call.camera || call.videoRequested ? .blue : .gray, action: center.toggleCamera)
+                    button("phone.down.fill", L("End Call"), .red, action: center.end)
                 }
-                HStack(spacing: 12) {
-                    AvatarView(jid: call.jid, name: call.name, size: 46)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(call.name).font(.headline).lineLimit(1)
-                        status(of: call).font(.callout).foregroundStyle(.secondary).monospacedDigit()
-                    }
-                    Spacer(minLength: 0)
+            }
+            .frame(height: 40)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// A video call: the other side fills the window, whatever its size, with
+    /// the name, ourselves and the buttons on top of the picture.
+    private func video(_ call: CallCenter.Call) -> some View {
+        ZStack {
+            Color.black
+            if call.remoteVideo {
+                LayerView(layer: RemoteVideo.shared.layer)
+            } else {
+                Text(L("Waiting for video…")).font(.callout).foregroundStyle(.white.opacity(0.7))
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2, perform: center.toggleFullScreen)
+        .overlay(alignment: .topLeading) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(call.name).font(.headline).lineLimit(1)
+                status(of: call).font(.callout).monospacedDigit().opacity(0.85)
+            }
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.6), radius: 3, y: 1)
+            // Clear of the window's own buttons.
+            .padding(.top, 30).padding(.horizontal, 14)
+        }
+        .overlay(alignment: .bottom) {
+            VStack(alignment: .trailing, spacing: 10) {
+                if call.camera {
+                    // Ourselves, small, in the corner.
+                    LayerView(layer: CallView.preview)
+                        .frame(width: center.fullScreen ? 200 : 110, height: center.fullScreen ? 150 : 82)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.white.opacity(0.5)))
                 }
-                HStack(spacing: 12) {
-                    if call.state == .ringing {
-                        button("phone.down.fill", L("Decline"), .red, action: center.decline)
-                        button(call.videoOffer ? "video.fill" : "phone.fill", L("Accept"), .green, action: center.accept)
-                    } else if call.state != .ended {
+                HStack(spacing: 10) {
+                    if call.state != .ended {
                         iconButton(call.muted ? "mic.slash.fill" : "mic.fill", call.muted ? L("Unmute") : L("Mute"),
                                    call.muted ? .orange : .gray, action: center.toggleMute)
                         iconButton(call.camera ? "video.fill" : "video.slash.fill", call.camera ? L("Turn Camera Off") : L("Turn Camera On"),
-                                   call.camera || call.videoRequested ? .blue : .gray, action: center.toggleCamera)
-                        button("phone.down.fill", L("End Call"), .red, action: center.end)
+                                   call.camera ? .blue : .gray, action: center.toggleCamera)
+                        iconButton(center.fullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                                   center.fullScreen ? L("Exit Full Screen") : L("Full Screen"), .gray, action: center.toggleFullScreen)
+                            .keyboardShortcut("f", modifiers: [.control, .command])
+                        iconButton("phone.down.fill", L("End Call"), .red, action: center.end)
                     }
                 }
-                .frame(height: 40)
+                .padding(8)
+                .background(.ultraThinMaterial, in: Capsule())
+                .frame(maxWidth: .infinity)
             }
-            .padding(16)
-            .frame(width: call.showsVideo ? 380 : 300)
-            .frame(maxHeight: .infinity)
+            .padding(12)
         }
+        .background {
+            // Esc leaves full screen, as everywhere else.
+            Button("", action: center.exitFullScreen).keyboardShortcut(.cancelAction).opacity(0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .ignoresSafeArea()
     }
 
     /// The camera's own picture, straight from the capture session.

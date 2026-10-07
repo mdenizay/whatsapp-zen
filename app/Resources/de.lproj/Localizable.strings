@@ -448,3 +448,5 @@
 "Turn Camera On" = "Kamera ein";
 "Video calls need the camera. Allow it in System Settings › Privacy & Security › Camera." = "Videoanrufe brauchen die Kamera. Erlaube sie in Systemeinstellungen › Datenschutz & Sicherheit › Kamera.";
 "There is no call in progress" = "Es läuft kein Anruf";
+"Full Screen" = "Vollbild";
+"Exit Full Screen" = "Vollbild beenden";

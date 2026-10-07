@@ -448,3 +448,5 @@
 "Turn Camera On" = "Kamerayı Aç";
 "Video calls need the camera. Allow it in System Settings › Privacy & Security › Camera." = "Görüntülü aramalar için kamera gerekir. Sistem Ayarları › Gizlilik ve Güvenlik › Kamera'dan izin verin.";
 "There is no call in progress" = "Devam eden bir arama yok";
+"Full Screen" = "Tam Ekran";
+"Exit Full Screen" = "Tam Ekrandan Çık";

@@ -448,3 +448,5 @@
 "Turn Camera On" = "Включить камеру";
 "Video calls need the camera. Allow it in System Settings › Privacy & Security › Camera." = "Для видеозвонков нужна камера. Разрешите её в Системных настройках › Конфиденциальность и безопасность › Камера.";
 "There is no call in progress" = "Нет активного звонка";
+"Full Screen" = "Во весь экран";
+"Exit Full Screen" = "Выйти из полноэкранного режима";

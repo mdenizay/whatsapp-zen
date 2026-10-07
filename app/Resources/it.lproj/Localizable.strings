@@ -448,3 +448,5 @@
 "Turn Camera On" = "Attiva fotocamera";
 "Video calls need the camera. Allow it in System Settings › Privacy & Security › Camera." = "Le videochiamate richiedono la fotocamera. Consentila in Impostazioni di Sistema › Privacy e sicurezza › Fotocamera.";
 "There is no call in progress" = "Nessuna chiamata in corso";
+"Full Screen" = "Schermo intero";
+"Exit Full Screen" = "Esci da schermo intero";
