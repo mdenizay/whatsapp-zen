@@ -77,6 +77,10 @@ pub struct Account {
     pub(crate) hide_read: std::sync::atomic::AtomicBool,
     /// Messages whose media is being fetched right now.
     downloading: Mutex<std::collections::HashSet<String>>,
+    /// The call in progress.
+    pub(crate) call: Mutex<Option<crate::call::ActiveCall>>,
+    /// Incoming calls that are ringing and can still be answered.
+    pub(crate) ringing: Mutex<std::collections::HashMap<String, whatsapp_rust::wacore::types::call::IncomingCall>>,
 }
 
 /// Takes a message off the list of running downloads when it goes out of scope.
@@ -138,6 +142,8 @@ impl Account {
             calls: Mutex::new(Default::default()),
             hide_read: std::sync::atomic::AtomicBool::new(false),
             downloading: Mutex::new(Default::default()),
+            call: Mutex::new(None),
+            ringing: Mutex::new(Default::default()),
         });
         let me = account.clone();
         account.rt.spawn(async move {
@@ -240,6 +246,7 @@ impl Account {
                 "SELECT COUNT(*) FROM messages WHERE chat=?1 AND ts >= (SELECT ts FROM messages WHERE chat=?1 AND id=?2)",
                 &[&r.chat, &r.id],
             ))),
+            "call_start" | "call_accept" | "call_end" | "call_mute" => self.call_command(r),
             "send_text" => self.send_text(&r.chat, &r.text, &r.reply_to, &r.mentions),
             "react" => self.react(&r.chat, &r.id, &r.emoji),
             "revoke" => self.revoke(&r.chat, &r.id),

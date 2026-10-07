@@ -2,6 +2,7 @@
 //! protocol kept behind a small JSON-over-C interface every native app uses.
 
 pub mod account;
+mod call;
 mod commands;
 pub mod db;
 pub mod ffi;

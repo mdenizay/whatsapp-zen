@@ -964,8 +964,17 @@ impl Account {
                     return;
                 }
                 self.calls.lock().unwrap().insert(id.clone(), (call.from.clone(), creator.clone()));
+                self.ringing_started(id, call);
                 let who = self.pn(&call.from).await;
-                self.send(json!({"type": "call", "name": self.db.name_of(&who), "video": video, "raw_jid": call.from.to_string(), "id": id}));
+                self.send(json!({"type": "call", "name": self.db.name_of(&who), "video": video, "raw_jid": call.from.to_string(), "jid": who, "id": id, "can_answer": !video}));
+            }
+            Event::MissedCall(missed) => {
+                let who = self.pn(&missed.from).await;
+                self.ringing_stopped(&missed.call_id, &who);
+            }
+            Event::CallEndedElsewhere(ended) => {
+                let who = self.pn(&ended.from).await;
+                self.ringing_stopped(&ended.call_id, &who);
             }
             Event::UndecryptableMessage(lost) => {
                 use whatsapp_rust::wacore::types::events::UnavailableType;

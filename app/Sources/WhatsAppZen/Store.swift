@@ -211,8 +211,16 @@ final class AppStore: ObservableObject, Identifiable {
             if let jid = obj["jid"] as? String { Task { @MainActor in Images.forgetAvatar(jid) } }
             avatarTick += 1
         case "call":
-            Notifier.shared.postCall(account: self, name: obj["name"] as? String ?? "", video: obj["video"] as? Bool ?? false,
-                                     from: obj["raw_jid"] as? String ?? "", callID: obj["id"] as? String ?? "")
+            let (name, callID) = (obj["name"] as? String ?? "", obj["id"] as? String ?? "")
+            if obj["can_answer"] as? Bool == true {
+                // A voice call this app can take: it rings in its own window.
+                CallCenter.shared.ringing(id: callID, jid: obj["jid"] as? String ?? "", name: name, account: self)
+            }
+            Notifier.shared.postCall(account: self, name: name, video: obj["video"] as? Bool ?? false,
+                                     from: obj["raw_jid"] as? String ?? "", callID: callID)
+        case "call_state":
+            CallCenter.shared.update(id: obj["id"] as? String ?? "", jid: obj["jid"] as? String ?? "", name: obj["name"] as? String ?? "",
+                                     state: obj["state"] as? String ?? "", muted: obj["muted"] as? Bool, account: self)
         case "fatal":
             errorText = obj["error"] as? String
         default:

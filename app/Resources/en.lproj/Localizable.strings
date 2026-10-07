@@ -431,3 +431,13 @@
 "Delete the selected messages?" = "Delete the selected messages?";
 "Downloading %@ of %@" = "Downloading %@ of %@";
 "That message is not on this Mac. Use \"Get older messages from your phone\" at the top of the chat to bring earlier ones." = "That message is not on this Mac. Use \"Get older messages from your phone\" at the top of the chat to bring earlier ones.";
+"Voice Call" = "Voice Call";
+"Calling…" = "Calling…";
+"Call ended" = "Call ended";
+"Accept" = "Accept";
+"End Call" = "End Call";
+"There is already a call in progress" = "There is already a call in progress";
+"No microphone was found" = "No microphone was found";
+"That call is no longer ringing" = "That call is no longer ringing";
+"Group calls are not available yet" = "Group calls are not available yet";
+"Calls need the microphone. Allow it in System Settings › Privacy & Security › Microphone." = "Calls need the microphone. Allow it in System Settings › Privacy & Security › Microphone.";

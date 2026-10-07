@@ -430,3 +430,13 @@
 "Delete the selected messages?" = "Eliminare i messaggi selezionati?";
 "Downloading %@ of %@" = "Download: %@ di %@";
 "That message is not on this Mac. Use \"Get older messages from your phone\" at the top of the chat to bring earlier ones." = "Quel messaggio non è su questo Mac. Usa «Recupera i messaggi precedenti dal telefono» in cima alla chat.";
+"Voice Call" = "Chiamata vocale";
+"Calling…" = "Chiamata in corso…";
+"Call ended" = "Chiamata terminata";
+"Accept" = "Accetta";
+"End Call" = "Termina";
+"There is already a call in progress" = "C'è già una chiamata in corso";
+"No microphone was found" = "Nessun microfono trovato";
+"That call is no longer ringing" = "Questa chiamata non sta più squillando";
+"Group calls are not available yet" = "Le chiamate di gruppo non sono ancora disponibili";
+"Calls need the microphone. Allow it in System Settings › Privacy & Security › Microphone." = "Le chiamate richiedono il microfono. Consentilo in Impostazioni di Sistema › Privacy e sicurezza › Microfono.";

@@ -616,6 +616,10 @@ struct ChatView: View {
             // With the title gone, keep the actions at the trailing edge.
             ToolbarSpacer(.flexible)
             ToolbarItemGroup(placement: .primaryAction) {
+                if !chat.isGroup {
+                    Button(L("Voice Call"), systemImage: "phone") { CallCenter.shared.start(chat, in: store) }
+                        .help(L("Voice Call"))
+                }
                 Button(L("Search in Chat"), systemImage: "magnifyingglass") { searching = true }
                     .popover(isPresented: $searching, arrowEdge: .bottom) {
                         ChatSearchView(chat: chat) { searching = false }.environmentObject(store)
