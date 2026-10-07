@@ -2,6 +2,10 @@
 
 The section for the running version is shown in the app after an update.
 
+## 1.0.1
+
+- After updating to 1.0, contact names are taken over from the old engine's data, so chats show names straight away instead of phone numbers
+
 ## 1.0.0
 
 - A new engine. The part of the app that talks to WhatsApp has been rewritten in Rust. Everything looks and works as before, and it is what makes the calls below, and versions for Windows and Linux, possible

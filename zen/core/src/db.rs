@@ -197,6 +197,28 @@ impl Db {
         Ok(Db { conn: Mutex::new(conn) })
     }
 
+    /// Takes over the names the Go core knew: it kept address-book and
+    /// display names in its own store, not in this database. Done once, when
+    /// this database has none of its own yet, so an account that was just
+    /// moved over shows names at once instead of numbers.
+    pub fn import_old_names(&self, store: &Path) {
+        if !store.exists() || self.count("SELECT (SELECT COUNT(*) FROM contacts) + (SELECT COUNT(*) FROM names)", &[]) > 0 {
+            return;
+        }
+        let conn = self.conn.lock().unwrap();
+        let path = store.to_string_lossy();
+        if conn.execute("ATTACH DATABASE ?1 AS old", [path.as_ref()]).is_err() {
+            return;
+        }
+        let _ = conn.execute_batch(
+            "INSERT INTO contacts(jid,name) SELECT their_jid, full_name FROM old.whatsmeow_contacts
+                 WHERE full_name != '' AND their_jid LIKE '%@s.whatsapp.net' ON CONFLICT(jid) DO NOTHING;
+             INSERT INTO names(jid,name) SELECT their_jid, push_name FROM old.whatsmeow_contacts
+                 WHERE push_name != '' AND their_jid LIKE '%@s.whatsapp.net' ON CONFLICT(jid) DO NOTHING;",
+        );
+        let _ = conn.execute_batch("DETACH DATABASE old");
+    }
+
     /// Runs several writes as one transaction (a history sync is thousands).
     pub fn write<T>(&self, work: impl FnOnce(&Writer) -> T) -> T {
         let conn = self.conn.lock().unwrap();

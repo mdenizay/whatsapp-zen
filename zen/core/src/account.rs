@@ -132,6 +132,7 @@ impl Account {
             std::fs::create_dir_all(dir.join(sub)).map_err(|e| e.to_string())?;
         }
         let db = Db::open(&dir.join("app.db")).map_err(|e| e.to_string())?;
+        db.import_old_names(&dir.join("store.db"));
         let account = Arc::new(Account {
             id: id.to_string(),
             dir,
