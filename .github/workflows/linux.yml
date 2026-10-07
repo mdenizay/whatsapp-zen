@@ -55,12 +55,24 @@ jobs:
           tar -C dist -czf "dist/whatsapp-zen-$VERSION-linux-x86_64.tar.gz" "whatsapp-zen-$VERSION"
           ls -la dist
 
+      # Install the package as a user would, start the app on a virtual
+      # display and keep a picture of its window.
+      - name: Smoke test
+        working-directory: zen
+        run: |
+          sudo apt-get install -y --no-install-recommends ./dist/*.deb xvfb adwaita-icon-theme fonts-cantarell
+          ZEN_DATA="$RUNNER_TEMP/zen-data" ZEN_SNAPSHOT="$PWD/dist/smoke.png" GSK_RENDERER=cairo \
+            timeout 60 xvfb-run -a -s "-screen 0 1280x800x24" whatsapp-zen
+          test -s dist/smoke.png
+
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: whatsapp-zen-linux
           path: |
             zen/dist/*.deb
             zen/dist/*.tar.gz
+            zen/dist/smoke.png
 
       - name: Publish
         if: ${{ inputs.tag != '' }}

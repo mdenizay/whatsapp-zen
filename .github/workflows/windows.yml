@@ -51,10 +51,35 @@ jobs:
           Compress-Archive -Path publish/* -DestinationPath "dist/WhatsApp-Zen-$version-windows-x64.zip"
           Get-ChildItem dist
 
+      # Nobody has a Windows machine at hand while this is developed: start
+      # the app, make sure it stays up, and keep a picture of what it shows.
+      - name: Smoke test
+        shell: pwsh
+        working-directory: zen/windows
+        run: |
+          $env:ZEN_DATA = Join-Path $env:RUNNER_TEMP "zen-data"
+          $app = Start-Process -FilePath publish/WhatsAppZen.exe -PassThru
+          Start-Sleep -Seconds 25
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+          [System.Drawing.Graphics]::FromImage($bitmap).CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+          $bitmap.Save("dist/smoke.png")
+          if ($app.HasExited) {
+            Write-Host "The app exited with code $($app.ExitCode)"
+            Get-WinEvent -LogName Application -MaxEvents 20 | Where-Object { $_.Message -match "WhatsAppZen" } | Select-Object -First 3 | Format-List TimeCreated, Message
+            exit 1
+          }
+          Write-Host "The app is running (window title: '$((Get-Process -Id $app.Id).MainWindowTitle)')"
+          Stop-Process -Id $app.Id -Force
+
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: whatsapp-zen-windows
-          path: zen/windows/dist/*.zip
+          path: |
+            zen/windows/dist/*.zip
+            zen/windows/dist/smoke.png
 
       - name: Publish
         if: ${{ inputs.tag != '' }}
