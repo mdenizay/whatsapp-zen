@@ -213,14 +213,14 @@ final class AppStore: ObservableObject, Identifiable {
         case "call":
             let (name, callID) = (obj["name"] as? String ?? "", obj["id"] as? String ?? "")
             if obj["can_answer"] as? Bool == true {
-                // A voice call this app can take: it rings in its own window.
-                CallCenter.shared.ringing(id: callID, jid: obj["jid"] as? String ?? "", name: name, account: self)
+                // A call this app can take: it rings in its own window.
+                CallCenter.shared.ringing(id: callID, jid: obj["jid"] as? String ?? "", name: name, video: obj["video"] as? Bool ?? false, account: self)
             }
             Notifier.shared.postCall(account: self, name: name, video: obj["video"] as? Bool ?? false,
                                      from: obj["raw_jid"] as? String ?? "", callID: callID)
         case "call_state":
             CallCenter.shared.update(id: obj["id"] as? String ?? "", jid: obj["jid"] as? String ?? "", name: obj["name"] as? String ?? "",
-                                     state: obj["state"] as? String ?? "", muted: obj["muted"] as? Bool, account: self)
+                                     state: obj["state"] as? String ?? "", on: obj["on"] as? Bool ?? obj["muted"] as? Bool, account: self)
         case "fatal":
             errorText = obj["error"] as? String
         default:

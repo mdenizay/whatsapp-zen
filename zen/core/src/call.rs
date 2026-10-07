@@ -13,10 +13,38 @@ use std::sync::{Arc, Mutex};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use serde_json::{json, Value};
 use whatsapp_rust::prelude::*;
-use whatsapp_rust::voip::CallHandle;
+use whatsapp_rust::voip::{CallEvent, CallHandle, VideoFrame, VideoUpgradeToken};
+use whatsapp_rust::wacore::types::call::VideoState;
 use whatsapp_rust::wacore::types::call::IncomingCall;
 
 use crate::account::{Account, Request};
+
+/// Where the app's camera frames go while a call has video: complete H.264
+/// access units (Annex B), one per item. The library never touches pixels;
+/// capture, encoding, decoding and display belong to each platform's app.
+static CAMERA: Mutex<Option<async_channel::Sender<Vec<u8>>>> = Mutex::new(None);
+
+/// Called by the app with each encoded camera frame (`WAVideoSend`).
+pub(crate) fn camera_frame(data: Vec<u8>) {
+    if let Some(camera) = CAMERA.lock().unwrap().as_ref() {
+        // A full queue means the call cannot keep up: drop the frame, never block the encoder.
+        let _ = camera.try_send(data);
+    }
+}
+
+/// The two ends the library wants for video. Frames from the other side are
+/// handed to `screen` (the app's `WAVideoSetSink` callback).
+fn video_endpoints(rt: &tokio::runtime::Handle, screen: Arc<dyn Fn(&[u8], bool) + Send + Sync>) -> (async_channel::Receiver<Vec<u8>>, async_channel::Sender<VideoFrame>) {
+    let (camera_tx, camera_rx) = async_channel::bounded::<Vec<u8>>(4);
+    let (screen_tx, screen_rx) = async_channel::bounded::<VideoFrame>(8);
+    *CAMERA.lock().unwrap() = Some(camera_tx);
+    rt.spawn(async move {
+        while let Ok(frame) = screen_rx.recv().await {
+            screen(&frame.data, frame.keyframe);
+        }
+    });
+    (camera_rx, screen_tx)
+}
 
 const RATE: f64 = 16_000.0;
 const FRAME: usize = 960;
@@ -28,6 +56,8 @@ pub(crate) struct ActiveCall {
     handle: CallHandle,
     /// Dropping this stops the sound devices.
     _audio: Audio,
+    /// The other side asked to turn the call into a video call.
+    video_request: Arc<Mutex<Option<VideoUpgradeToken>>>,
 }
 
 /// The microphone and speaker of a call. The streams live on their own
@@ -200,11 +230,17 @@ impl Account {
                     return Err("Group calls are not available yet".into());
                 }
                 let (audio, mic, speaker, heard) = Audio::open(&self.rt)?;
-                let handle = self.rt.block_on(client.voip().call(&peer).audio(mic, speaker).start()).map_err(|e| e.to_string())?;
+                let call = client.voip();
+                let mut builder = call.call(&peer).audio(mic, speaker);
+                if r.video {
+                    let (camera, screen) = video_endpoints(&self.rt, self.screen.clone());
+                    builder = builder.video(camera, screen);
+                }
+                let handle = self.rt.block_on(builder.start()).map_err(|e| e.to_string())?;
                 let id = handle.call_id().to_string();
-                self.call_event(&id, &r.jid, "calling", json!({"incoming": false}));
-                self.watch_call(handle.clone(), id.clone(), r.jid.clone(), heard);
-                *self.call.lock().unwrap() = Some(ActiveCall { id: id.clone(), peer: r.jid.clone(), handle, _audio: audio });
+                self.call_event(&id, &r.jid, "calling", json!({"incoming": false, "video": r.video}));
+                let video_request = self.watch_call(handle.clone(), id.clone(), r.jid.clone(), heard);
+                *self.call.lock().unwrap() = Some(ActiveCall { id: id.clone(), peer: r.jid.clone(), handle, _audio: audio, video_request });
                 Ok(json!({"id": id}))
             }
             "call_accept" => {
@@ -215,13 +251,43 @@ impl Account {
                 let incoming = self.ringing.lock().unwrap().remove(&r.id).ok_or("That call is no longer ringing")?;
                 let peer = self.rt.block_on(self.pn(&incoming.from));
                 let (audio, mic, speaker, heard) = Audio::open(&self.rt)?;
-                let handle = self.rt.block_on(client.voip().accept(&incoming).audio(mic, speaker).start()).map_err(|e| e.to_string())?;
-                self.call_event(&r.id, &peer, "connecting", json!({"incoming": true}));
-                self.watch_call(handle.clone(), r.id.clone(), peer.clone(), heard);
-                *self.call.lock().unwrap() = Some(ActiveCall { id: r.id.clone(), peer, handle, _audio: audio });
+                let call = client.voip();
+                let mut builder = call.accept(&incoming).audio(mic, speaker);
+                if r.video {
+                    let (camera, screen) = video_endpoints(&self.rt, self.screen.clone());
+                    builder = builder.video(camera, screen);
+                }
+                let handle = self.rt.block_on(builder.start()).map_err(|e| e.to_string())?;
+                self.call_event(&r.id, &peer, "connecting", json!({"incoming": true, "video": r.video}));
+                let video_request = self.watch_call(handle.clone(), r.id.clone(), peer.clone(), heard);
+                *self.call.lock().unwrap() = Some(ActiveCall { id: r.id.clone(), peer, handle, _audio: audio, video_request });
+                Ok(Value::Null)
+            }
+            "call_video" => {
+                // Turns our camera on or off during a call; turning it on also
+                // answers the other side's request for video, if there is one.
+                let Some((handle, id, peer, request)) = self.call.lock().unwrap().as_ref().map(|c| (c.handle.clone(), c.id.clone(), c.peer.clone(), c.video_request.lock().unwrap().take())) else {
+                    return Err("There is no call in progress".into());
+                };
+                if r.on {
+                    let (camera, screen) = video_endpoints(&self.rt, self.screen.clone());
+                    self.rt
+                        .block_on(async {
+                            match request {
+                                Some(token) => handle.accept_video(token, camera, screen).await,
+                                None => handle.start_video(camera, screen).await,
+                            }
+                        })
+                        .map_err(|e| e.to_string())?;
+                } else {
+                    *CAMERA.lock().unwrap() = None;
+                    self.rt.block_on(handle.stop_video()).map_err(|e| e.to_string())?;
+                }
+                self.call_event(&id, &peer, "camera", json!({"on": r.on}));
                 Ok(Value::Null)
             }
             "call_end" => {
+                *CAMERA.lock().unwrap() = None;
                 let call = self.call.lock().unwrap().take();
                 if let Some(call) = call {
                     self.rt.block_on(call.handle.hangup());
@@ -243,8 +309,28 @@ impl Account {
     /// Follows a call until it is over: reports when the other side's voice
     /// first arrives, and lets go of the devices when the call ends, however
     /// it ends.
-    fn watch_call(self: &Arc<Self>, handle: CallHandle, id: String, peer: String, heard: Arc<AtomicBool>) {
+    fn watch_call(self: &Arc<Self>, handle: CallHandle, id: String, peer: String, heard: Arc<AtomicBool>) -> Arc<Mutex<Option<VideoUpgradeToken>>> {
         let me = self.clone();
+        let video_request: Arc<Mutex<Option<VideoUpgradeToken>>> = Arc::new(Mutex::new(None));
+        // What the other side does with its camera.
+        let (events, video_me, video_id, video_peer, pending) = (handle.events(), self.clone(), id.clone(), peer.clone(), video_request.clone());
+        let video_watcher = self.rt.spawn(async move {
+            while let Ok(event) = events.recv().await {
+                let CallEvent::VideoStateChanged { state, upgrade_token, .. } = event else { continue };
+                match state {
+                    VideoState::UpgradeRequest | VideoState::UpgradeRequestV2 => {
+                        *pending.lock().unwrap() = upgrade_token;
+                        video_me.call_event(&video_id, &video_peer, "video_request", json!({}));
+                    }
+                    VideoState::Enabled | VideoState::UpgradeAccept => video_me.call_event(&video_id, &video_peer, "remote_video", json!({"on": true})),
+                    VideoState::Disabled | VideoState::Stopped | VideoState::Paused | VideoState::UpgradeCancel | VideoState::UpgradeCancelByTimeout => {
+                        *pending.lock().unwrap() = None;
+                        video_me.call_event(&video_id, &video_peer, "remote_video", json!({"on": false}));
+                    }
+                    _ => {}
+                }
+            }
+        });
         let (connected_id, connected_peer, active) = (id.clone(), peer.clone(), heard);
         let connected = self.clone();
         let watcher = self.rt.spawn(async move {
@@ -256,6 +342,8 @@ impl Account {
         self.rt.spawn(async move {
             handle.wait_ended().await;
             watcher.abort();
+            video_watcher.abort();
+            *CAMERA.lock().unwrap() = None;
             // Still ours: the call ended on its own (the other side hung up, or it failed).
             let ours = {
                 let mut call = me.call.lock().unwrap();
@@ -269,6 +357,7 @@ impl Account {
                 me.call_event(&id, &peer, "ended", json!({}));
             }
         });
+        video_request
     }
 
     /// An incoming call started ringing: remembered so it can be accepted.

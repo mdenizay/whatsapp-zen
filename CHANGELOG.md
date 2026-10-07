@@ -2,6 +2,14 @@
 
 The section for the running version is shown in the app after an update.
 
+## 1.0.0
+
+- A new engine. The part of the app that talks to WhatsApp has been rewritten in Rust. Everything looks and works as before, and it is what makes the calls below, and versions for Windows and Linux, possible
+- Link once more: the new engine cannot take over the old link, so the app shows the pairing code after this update. Your chats and messages stay. The old "WhatsApp Zen" entry under Linked Devices on your phone can be removed
+- Voice calls (new, still being proven): a phone button in one-to-one chats, and incoming calls ring in a small window with Accept and Decline. There is no echo cancelling yet, so headphones are recommended
+- Video calls (new, still being proven): a video button next to it; the camera can be turned on and off during a call
+- A group's name follows changes as they happen
+
 ## 0.9.4
 
 - The log now records the read-receipt setting WhatsApp reports for the account, to make "why do I see blue ticks" answerable

@@ -21,6 +21,16 @@ final class CallCenter: ObservableObject {
         var muted = false
         /// When the other side's voice first arrived.
         var since: Date?
+        /// Our camera is on.
+        var camera = false
+        /// The other side's camera is on.
+        var remoteVideo = false
+        /// The other side asked to add video to a voice call.
+        var videoRequested = false
+        /// It rang as a video call.
+        var videoOffer = false
+
+        var showsVideo: Bool { camera || remoteVideo }
     }
 
     @Published private(set) var call: Call?
@@ -30,10 +40,10 @@ final class CallCenter: ObservableObject {
     private var store: AppStore? { AppModel.shared.accounts.first { $0.id == call?.account } }
 
     /// An incoming call started ringing.
-    func ringing(id: String, jid: String, name: String, account: AppStore) {
+    func ringing(id: String, jid: String, name: String, video: Bool, account: AppStore) {
         // One call at a time: a second caller is left to the phone.
         guard call == nil || call?.state == .ended else { return }
-        call = Call(id: id, jid: jid, name: name, account: account.id, incoming: true, state: .ringing)
+        call = Call(id: id, jid: jid, name: name, account: account.id, incoming: true, state: .ringing, videoOffer: video)
         ring = NSSound(named: "Submarine")
         ring?.loops = true
         ring?.play()
@@ -41,7 +51,7 @@ final class CallCenter: ObservableObject {
     }
 
     /// The core reported a change in a call's state.
-    func update(id: String, jid: String, name: String, state: String, muted: Bool?, account: AppStore) {
+    func update(id: String, jid: String, name: String, state: String, on: Bool?, account: AppStore) {
         if call?.id != id {
             // A call placed from here, heard about for the first time.
             guard state == "calling" else { return }
@@ -49,11 +59,26 @@ final class CallCenter: ObservableObject {
             show()
         }
         switch state {
+        case "camera":
+            call?.camera = on ?? false
+            call?.videoRequested = false
+            if on == true { CameraEncoder.shared.start() } else { CameraEncoder.shared.stop() }
+            resize()
+        case "remote_video":
+            call?.remoteVideo = on ?? false
+            if on == true {
+                RemoteVideo.shared.attach()
+            } else {
+                RemoteVideo.shared.reset()
+            }
+            resize()
+        case "video_request":
+            call?.videoRequested = true
         case "connecting": call?.state = .connecting
         case "active":
             call?.state = .active
             call?.since = Date()
-        case "muted": call?.muted = muted ?? false
+        case "muted": call?.muted = on ?? false
         case "ended": finish()
         default: break
         }
@@ -72,15 +97,54 @@ final class CallCenter: ObservableObject {
 
     private static var microphoneDenied: String { L("Calls need the microphone. Allow it in System Settings › Privacy & Security › Microphone.") }
 
-    func start(_ chat: Chat, in store: AppStore) {
+    @MainActor private func cameraAllowed() async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized: return true
+        case .notDetermined: return await AVCaptureDevice.requestAccess(for: .video)
+        default: return false
+        }
+    }
+
+    private static var cameraDenied: String { L("Video calls need the camera. Allow it in System Settings › Privacy & Security › Camera.") }
+
+    func start(_ chat: Chat, video: Bool = false, in store: AppStore) {
         guard call == nil else { return }
         Task { @MainActor in
             guard await microphoneAllowed() else {
                 store.errorText = Self.microphoneDenied
                 return
             }
+            if video, await !cameraAllowed() {
+                store.errorText = Self.cameraDenied
+                return
+            }
             do {
-                try await Core.run("call_start", ["jid": chat.jid], account: store.id)
+                if video { RemoteVideo.shared.attach() }
+                try await Core.run("call_start", ["jid": chat.jid, "video": video], account: store.id)
+                if video {
+                    self.call?.camera = true
+                    CameraEncoder.shared.start()
+                    self.resize()
+                }
+            } catch {
+                store.errorText = L(error.localizedDescription)
+            }
+        }
+    }
+
+    /// Turns our camera on or off during the call; on also answers the other
+    /// side's request for video.
+    func toggleCamera() {
+        guard let call, let store else { return }
+        let on = !call.camera
+        Task { @MainActor in
+            if on, await !cameraAllowed() {
+                store.errorText = Self.cameraDenied
+                return
+            }
+            do {
+                if on { RemoteVideo.shared.attach() }
+                try await Core.run("call_video", ["on": on], account: store.id)
             } catch {
                 store.errorText = L(error.localizedDescription)
             }
@@ -97,8 +161,17 @@ final class CallCenter: ObservableObject {
                 self.decline()
                 return
             }
+            // A video call is answered with our camera on, if it may be used.
+            let video = call.videoOffer ? await cameraAllowed() : false
             do {
-                try await Core.run("call_accept", ["id": call.id], account: store.id)
+                if video { RemoteVideo.shared.attach() }
+                try await Core.run("call_accept", ["id": call.id, "video": video], account: store.id)
+                if video {
+                    self.call?.camera = true
+                    self.call?.remoteVideo = true
+                    CameraEncoder.shared.start()
+                    self.resize()
+                }
             } catch {
                 store.errorText = L(error.localizedDescription)
                 self.finish()
@@ -132,6 +205,8 @@ final class CallCenter: ObservableObject {
     /// Shows "ended" for a moment, then closes the window.
     private func finish() {
         stopRinging()
+        CameraEncoder.shared.stop()
+        RemoteVideo.shared.reset()
         guard call != nil, call?.state != .ended else { return }
         call?.state = .ended
         let id = call?.id
@@ -141,6 +216,18 @@ final class CallCenter: ObservableObject {
             panel?.orderOut(nil)
             panel = nil
         }
+    }
+
+    /// The window grows to hold the pictures of a video call and shrinks back.
+    private func resize() {
+        guard let panel, let call else { return }
+        let size = call.showsVideo ? NSSize(width: 380, height: 420) : NSSize(width: 300, height: 150)
+        var frame = panel.frame
+        // Keep the top right corner where it is.
+        frame.origin.x += frame.width - size.width
+        frame.origin.y += frame.height - size.height
+        frame.size = size
+        panel.setFrame(frame, display: true, animate: true)
     }
 
     private func show() {
@@ -173,6 +260,30 @@ struct CallView: View {
     var body: some View {
         if let call = center.call {
             VStack(spacing: 14) {
+                if call.showsVideo {
+                    ZStack(alignment: .bottomTrailing) {
+                        if call.remoteVideo {
+                            LayerView(layer: RemoteVideo.shared.layer)
+                        } else {
+                            Color.black
+                            Text(L("Waiting for video…")).font(.callout).foregroundStyle(.white.opacity(0.7))
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                        if call.camera {
+                            // Ourselves, small, in the corner.
+                            LayerView(layer: CallView.preview)
+                                .frame(width: 96, height: 72)
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(.white.opacity(0.5)))
+                                .padding(8)
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .frame(maxHeight: .infinity)
+                }
+                if call.videoRequested {
+                    Text(L("%@ wants to turn on video", call.name)).font(.callout).foregroundStyle(.secondary)
+                }
                 HStack(spacing: 12) {
                     AvatarView(jid: call.jid, name: call.name, size: 46)
                     VStack(alignment: .leading, spacing: 2) {
@@ -184,23 +295,46 @@ struct CallView: View {
                 HStack(spacing: 12) {
                     if call.state == .ringing {
                         button("phone.down.fill", L("Decline"), .red, action: center.decline)
-                        button("phone.fill", L("Accept"), .green, action: center.accept)
+                        button(call.videoOffer ? "video.fill" : "phone.fill", L("Accept"), .green, action: center.accept)
                     } else if call.state != .ended {
-                        button(call.muted ? "mic.slash.fill" : "mic.fill", call.muted ? L("Unmute") : L("Mute"),
-                               call.muted ? .orange : .gray, action: center.toggleMute)
+                        iconButton(call.muted ? "mic.slash.fill" : "mic.fill", call.muted ? L("Unmute") : L("Mute"),
+                                   call.muted ? .orange : .gray, action: center.toggleMute)
+                        iconButton(call.camera ? "video.fill" : "video.slash.fill", call.camera ? L("Turn Camera Off") : L("Turn Camera On"),
+                                   call.camera || call.videoRequested ? .blue : .gray, action: center.toggleCamera)
                         button("phone.down.fill", L("End Call"), .red, action: center.end)
                     }
                 }
                 .frame(height: 40)
             }
             .padding(16)
-            .frame(width: 300)
+            .frame(width: call.showsVideo ? 380 : 300)
+            .frame(maxHeight: .infinity)
         }
+    }
+
+    /// The camera's own picture, straight from the capture session.
+    static let preview: AVCaptureVideoPreviewLayer = {
+        let layer = AVCaptureVideoPreviewLayer(session: CameraEncoder.shared.session)
+        layer.videoGravity = .resizeAspectFill
+        return layer
+    }()
+
+    private func iconButton(_ icon: String, _ title: String, _ color: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.callout.weight(.medium))
+                .frame(width: 44, height: 36)
+                .foregroundStyle(.white)
+                .background(color, in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(title)
     }
 
     @ViewBuilder private func status(of call: CallCenter.Call) -> some View {
         switch call.state {
-        case .ringing: Text(L("Incoming voice call"))
+        case .ringing: Text(call.videoOffer ? L("Incoming video call") : L("Incoming voice call"))
         case .calling: Text(L("Calling…"))
         case .connecting: Text(L("Connecting…"))
         case .ended: Text(L("Call ended"))

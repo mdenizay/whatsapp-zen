@@ -14,7 +14,7 @@
         <string>de</string><string>es</string><string>pt</string><string>it</string>
     </array>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.9.4</string>
+    <key>CFBundleShortVersionString</key><string>1.0.0</string>
     <key>CFBundleVersion</key><string>1</string>
     <key>LSMinimumSystemVersion</key><string>26.0</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.social-networking</string>
@@ -22,6 +22,8 @@
     <key>NSLocationUsageDescription</key><string>Your location is used only when you choose to send it in a chat.</string>
     <key>NSLocationWhenInUseUsageDescription</key><string>Your location is used only when you choose to send it in a chat.</string>
     <key>NSFaceIDUsageDescription</key><string>Touch ID unlocks the app and locked chats.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>WhatsApp Zen uses the camera for video calls.</string>
     <key>NSMicrophoneUsageDescription</key><string>The microphone is used to record voice messages.</string>
     <key>NSPrincipalClass</key><string>NSApplication</string>
 </dict>

@@ -9,7 +9,10 @@ package main
 
 /*
 #include <stdlib.h>
+#include <stddef.h>
+#include <stdint.h>
 typedef void (*wa_event_cb)(const char*);
+typedef void (*wa_video_cb)(const uint8_t*, size_t, int);
 static void wa_call_cb(wa_event_cb cb, const char* s) { cb(s); }
 */
 import "C"
@@ -184,5 +187,14 @@ func WACall(req *C.char) *C.char {
 func WAFree(p *C.char) {
 	C.free(unsafe.Pointer(p))
 }
+
+// Calls exist only in the Rust core (zen/core); these keep the app linking
+// against this one.
+
+//export WAVideoSetSink
+func WAVideoSetSink(cb C.wa_video_cb) {}
+
+//export WAVideoSend
+func WAVideoSend(data *C.uint8_t, n C.size_t) {}
 
 func main() {}

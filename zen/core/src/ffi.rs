@@ -12,6 +12,10 @@ use serde_json::{json, Value};
 use crate::account::{Account, Emit, Request};
 
 type Callback = extern "C" fn(*const c_char);
+type VideoCallback = extern "C" fn(*const u8, usize, i32);
+
+/// Where frames of the other side's video go; set by `WAVideoSetSink`.
+static VIDEO_SINK: Mutex<Option<VideoCallback>> = Mutex::new(None);
 
 struct Core {
     base: PathBuf,
@@ -61,7 +65,13 @@ impl Core {
             return Ok(());
         }
         self.adopt_development_session(id);
-        let account = Account::start(id, self.accounts_dir().join(id), self.rt.handle().clone(), self.emit.clone())?;
+        let screen = Arc::new(|data: &[u8], keyframe: bool| {
+            let sink = *VIDEO_SINK.lock().unwrap();
+            if let Some(sink) = sink {
+                sink(data.as_ptr(), data.len(), keyframe as i32);
+            }
+        });
+        let account = Account::start(id, self.accounts_dir().join(id), self.rt.handle().clone(), self.emit.clone(), screen)?;
         accounts.insert(id.to_string(), account);
         Ok(())
     }
@@ -136,5 +146,25 @@ pub unsafe extern "C" fn WACall(request: *const c_char) -> *mut c_char {
 pub unsafe extern "C" fn WAFree(p: *mut c_char) {
     if !p.is_null() {
         drop(CString::from_raw(p));
+    }
+}
+
+/// Sets where the other side's video goes during a call: one complete H.264
+/// access unit (Annex B) per call, valid only during the callback, on an
+/// arbitrary thread. `keyframe` is 1 for a frame decoding can start from.
+#[no_mangle]
+pub extern "C" fn WAVideoSetSink(callback: VideoCallback) {
+    *VIDEO_SINK.lock().unwrap() = Some(callback);
+}
+
+/// Hands the core one encoded camera frame (a complete H.264 access unit,
+/// Annex B, parameter sets included on keyframes) for the call in progress.
+///
+/// # Safety
+/// `data` must point to `len` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn WAVideoSend(data: *const u8, len: usize) {
+    if !data.is_null() && len > 0 {
+        crate::call::camera_frame(std::slice::from_raw_parts(data, len).to_vec());
     }
 }

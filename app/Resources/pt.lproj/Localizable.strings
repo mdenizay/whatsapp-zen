@@ -441,3 +441,10 @@
 "Group calls are not available yet" = "Chamadas em grupo ainda não estão disponíveis";
 "Calls need the microphone. Allow it in System Settings › Privacy & Security › Microphone." = "As chamadas precisam do microfone. Permita em Ajustes do Sistema › Privacidade e Segurança › Microfone.";
 "This version connects to WhatsApp in a new way, so it has to be linked once more. Your chats and messages are still here." = "Esta versão se conecta ao WhatsApp de uma nova forma, por isso precisa ser conectada mais uma vez. Suas conversas e mensagens continuam aqui.";
+"Video Call" = "Chamada de vídeo";
+"Waiting for video…" = "Aguardando o vídeo…";
+"%@ wants to turn on video" = "%@ quer ativar o vídeo";
+"Turn Camera Off" = "Desligar câmera";
+"Turn Camera On" = "Ligar câmera";
+"Video calls need the camera. Allow it in System Settings › Privacy & Security › Camera." = "As chamadas de vídeo precisam da câmera. Permita em Ajustes do Sistema › Privacidade e Segurança › Câmera.";
+"There is no call in progress" = "Não há chamada em andamento";

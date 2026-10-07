@@ -51,6 +51,7 @@ pub struct Request {
     pub lng: f64,
     pub plain: bool,
     pub action: String,
+    pub video: bool,
 }
 
 struct Status {
@@ -79,6 +80,8 @@ pub struct Account {
     downloading: Mutex<std::collections::HashSet<String>>,
     /// The call in progress.
     pub(crate) call: Mutex<Option<crate::call::ActiveCall>>,
+    /// Shows a frame of the other side's video (set by the app).
+    pub(crate) screen: Arc<dyn Fn(&[u8], bool) + Send + Sync>,
     /// Incoming calls that are ringing and can still be answered.
     pub(crate) ringing: Mutex<std::collections::HashMap<String, whatsapp_rust::wacore::types::call::IncomingCall>>,
 }
@@ -124,7 +127,7 @@ impl whatsapp_rust::wacore::download::DownloadWriter for Counting {
 
 impl Account {
     /// Opens the account kept in `dir` (creating it) and starts connecting.
-    pub fn start(id: &str, dir: PathBuf, rt: tokio::runtime::Handle, emit: Emit) -> Result<Arc<Account>, String> {
+    pub fn start(id: &str, dir: PathBuf, rt: tokio::runtime::Handle, emit: Emit, screen: Arc<dyn Fn(&[u8], bool) + Send + Sync>) -> Result<Arc<Account>, String> {
         for sub in ["media", "avatars"] {
             std::fs::create_dir_all(dir.join(sub)).map_err(|e| e.to_string())?;
         }
@@ -143,6 +146,7 @@ impl Account {
             hide_read: std::sync::atomic::AtomicBool::new(false),
             downloading: Mutex::new(Default::default()),
             call: Mutex::new(None),
+            screen,
             ringing: Mutex::new(Default::default()),
         });
         let me = account.clone();
@@ -246,7 +250,7 @@ impl Account {
                 "SELECT COUNT(*) FROM messages WHERE chat=?1 AND ts >= (SELECT ts FROM messages WHERE chat=?1 AND id=?2)",
                 &[&r.chat, &r.id],
             ))),
-            "call_start" | "call_accept" | "call_end" | "call_mute" => self.call_command(r),
+            "call_start" | "call_accept" | "call_end" | "call_mute" | "call_video" => self.call_command(r),
             "send_text" => self.send_text(&r.chat, &r.text, &r.reply_to, &r.mentions),
             "react" => self.react(&r.chat, &r.id, &r.emoji),
             "revoke" => self.revoke(&r.chat, &r.id),

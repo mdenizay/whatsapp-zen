@@ -442,3 +442,10 @@
 "Group calls are not available yet" = "Group calls are not available yet";
 "Calls need the microphone. Allow it in System Settings › Privacy & Security › Microphone." = "Calls need the microphone. Allow it in System Settings › Privacy & Security › Microphone.";
 "This version connects to WhatsApp in a new way, so it has to be linked once more. Your chats and messages are still here." = "This version connects to WhatsApp in a new way, so it has to be linked once more. Your chats and messages are still here.";
+"Video Call" = "Video Call";
+"Waiting for video…" = "Waiting for video…";
+"%@ wants to turn on video" = "%@ wants to turn on video";
+"Turn Camera Off" = "Turn Camera Off";
+"Turn Camera On" = "Turn Camera On";
+"Video calls need the camera. Allow it in System Settings › Privacy & Security › Camera." = "Video calls need the camera. Allow it in System Settings › Privacy & Security › Camera.";
+"There is no call in progress" = "There is no call in progress";

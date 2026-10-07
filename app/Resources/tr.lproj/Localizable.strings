@@ -441,3 +441,10 @@
 "Group calls are not available yet" = "Grup aramaları henüz kullanılamıyor";
 "Calls need the microphone. Allow it in System Settings › Privacy & Security › Microphone." = "Aramalar için mikrofon gerekir. Sistem Ayarları › Gizlilik ve Güvenlik › Mikrofon'dan izin verin.";
 "This version connects to WhatsApp in a new way, so it has to be linked once more. Your chats and messages are still here." = "Bu sürüm WhatsApp'a yeni bir yolla bağlanıyor, bu yüzden bir kez daha bağlanması gerekiyor. Sohbetleriniz ve mesajlarınız yerinde duruyor.";
+"Video Call" = "Görüntülü Arama";
+"Waiting for video…" = "Görüntü bekleniyor…";
+"%@ wants to turn on video" = "%@ görüntüyü açmak istiyor";
+"Turn Camera Off" = "Kamerayı Kapat";
+"Turn Camera On" = "Kamerayı Aç";
+"Video calls need the camera. Allow it in System Settings › Privacy & Security › Camera." = "Görüntülü aramalar için kamera gerekir. Sistem Ayarları › Gizlilik ve Güvenlik › Kamera'dan izin verin.";
+"There is no call in progress" = "Devam eden bir arama yok";

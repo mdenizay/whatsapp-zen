@@ -1,7 +1,8 @@
 # WhatsApp Zen
 
 A small, native macOS client for WhatsApp: a SwiftUI/AppKit interface on top of
-the [whatsmeow](https://github.com/tulir/whatsmeow) protocol library. It links
+a Rust core built on the [whatsapp-rust](https://github.com/oxidezap/whatsapp-rust)
+protocol library. It links
 to your account as a companion device (like WhatsApp Web) and uses a fraction
 of the memory of the official app.
 
@@ -59,10 +60,10 @@ Then open the app and scan the QR code from WhatsApp on your phone
 
 ## Build from source
 
-You need Xcode 26 or later (or its Command Line Tools) and Go.
+You need Xcode 26 or later (or its Command Line Tools) and Rust.
 
 ```bash
-brew install go
+brew install rustup && rustup toolchain install stable
 ./build.sh
 open "dist/WhatsApp Zen.app"
 ```
@@ -71,7 +72,8 @@ open "dist/WhatsApp Zen.app"
 
 | Part | What it is |
 | --- | --- |
-| `core/` | Go. Wraps whatsmeow, keeps chats and messages in SQLite, and is built as a C static library. Its whole surface is `WAStart`, `WACall` (JSON command in, JSON reply out) and an event callback. |
+| `zen/core/` | Rust. Wraps whatsapp-rust, keeps chats and messages in SQLite, and is built as a C static library. Its surface is `WAStart`, `WACall` (JSON command in, JSON reply out), an event callback, and two functions for the video of a call. It has no macOS in it: the same core is meant to sit under native apps for Windows and Linux. |
+| `core/` | Go. The core the app used up to 0.9, on whatsmeow, with the same C surface (without calls). `CORE=go ./build.sh` still builds with it. |
 | `app/` | Swift. The SwiftUI/AppKit interface, linked against the core. |
 | `tools/` | The script that draws the app icon. |
 
@@ -85,7 +87,8 @@ and quits, and `tools/frame-screenshot.swift` puts each on a background.
 
 ## Credits and license
 
-- [whatsmeow](https://github.com/tulir/whatsmeow) by Tulir Asokan (MPL-2.0)
+- [whatsapp-rust](https://github.com/oxidezap/whatsapp-rust) by João Lucas de Oliveira Lopes and contributors (MIT)
+- [whatsmeow](https://github.com/tulir/whatsmeow) by Tulir Asokan (MPL-2.0), which the first versions were built on
 - WhatsApp glyph from [Simple Icons](https://simpleicons.org) (CC0)
 
 This project's own code is released under the MIT License; see `LICENSE`.

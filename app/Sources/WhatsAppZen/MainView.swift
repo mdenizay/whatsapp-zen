@@ -619,6 +619,8 @@ struct ChatView: View {
                 if !chat.isGroup {
                     Button(L("Voice Call"), systemImage: "phone") { CallCenter.shared.start(chat, in: store) }
                         .help(L("Voice Call"))
+                    Button(L("Video Call"), systemImage: "video") { CallCenter.shared.start(chat, video: true, in: store) }
+                        .help(L("Video Call"))
                 }
                 Button(L("Search in Chat"), systemImage: "magnifyingglass") { searching = true }
                     .popover(isPresented: $searching, arrowEdge: .bottom) {

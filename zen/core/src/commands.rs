@@ -946,7 +946,7 @@ impl Account {
                 self.calls.lock().unwrap().insert(id.clone(), (call.from.clone(), creator.clone()));
                 self.ringing_started(id, call);
                 let who = self.pn(&call.from).await;
-                self.send(json!({"type": "call", "name": self.db.name_of(&who), "video": video, "raw_jid": call.from.to_string(), "jid": who, "id": id, "can_answer": !video}));
+                self.send(json!({"type": "call", "name": self.db.name_of(&who), "video": video, "raw_jid": call.from.to_string(), "jid": who, "id": id, "can_answer": true}));
             }
             Event::MissedCall(missed) => {
                 let who = self.pn(&missed.from).await;
