@@ -40,8 +40,8 @@ of the memory of the official app.
 - English, Turkish, Russian, French, German, Spanish, Portuguese and Italian;
   follows the system (or per-app) language
 
-Not supported: voice and video calls (the protocol library does not implement
-call media; incoming calls are shown as a notification), posting status
+Voice and video calls are new and lightly tested (one-to-one only, no echo
+cancellation: use headphones). Not supported: group calls, posting status
 updates, view-once media, communities and channels. Messages are stored
 unencrypted on disk; rely on FileVault for encryption at rest.
 
@@ -57,6 +57,17 @@ The app is signed and notarized, so it opens like any other.
 
 Then open the app and scan the QR code from WhatsApp on your phone
 (Settings → Linked Devices → Link a Device).
+
+### Linux and Windows (experimental)
+
+The same Rust core with a native window for each system: GTK 4 / libadwaita
+on Linux ([zen/gtk](zen/gtk)), WinUI 3 on Windows ([zen/windows](zen/windows)).
+They are first versions with the essentials (chats, messages, replies,
+reactions, photos, files, notifications) and have been tried far less than
+the macOS app. Downloads are on the
+[releases page](https://github.com/mdenizay/whatsapp-zen/releases) under
+"WhatsApp Zen for Linux" and "WhatsApp Zen for Windows"; problems and wishes
+are welcome in the issues.
 
 ## Build from source
 
