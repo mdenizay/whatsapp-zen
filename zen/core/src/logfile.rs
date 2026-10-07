@@ -43,7 +43,9 @@ impl log::Log for FileLog {
 /// already installed (a tool that prints the log itself, say).
 pub fn start(dir: &Path) {
     let Ok(file) = File::create(dir.join("core.log")) else { return };
-    if log::set_boxed_logger(Box::new(FileLog(Mutex::new(file)))).is_ok() {
+    // Leaked on purpose: the logger lives as long as the process.
+    let logger: &'static FileLog = Box::leak(Box::new(FileLog(Mutex::new(file))));
+    if log::set_logger(logger).is_ok() {
         log::set_max_level(log::LevelFilter::Info);
     }
 }
