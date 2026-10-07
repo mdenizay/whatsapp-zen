@@ -649,6 +649,12 @@ impl Account {
                     self.db.write(|w| mark_deleted(w, chat, &target));
                     self.changed(chat);
                 }
+                Some(Type::EphemeralSetting) => {
+                    // The chat's disappearing-message timer was changed.
+                    let timer = protocol.ephemeral_expiration.unwrap_or(0);
+                    self.db.write(|w| w.exec("UPDATE chats SET ephemeral=?2 WHERE jid=?1", &[&chat, &timer]));
+                    self.send(json!({"type": "chats"}));
+                }
                 Some(Type::MessageEdit) if !target.is_empty() => {
                     if let Some(text) = protocol.edited_message.as_option().and_then(|edited| edited.text_content()) {
                         self.db.write(|w| w.exec("UPDATE messages SET text=?3, edited=1 WHERE chat=?1 AND id=?2", &[&chat, &target, &text]));
@@ -662,7 +668,7 @@ impl Account {
         false
     }
 
-    async fn handle(&self, event: &Event) {
+    async fn handle(self: &Arc<Self>, event: &Event) {
         match event {
             Event::Connected(_) => {
                 self.set_state("connected", "");
@@ -670,6 +676,8 @@ impl Account {
                 self.repair_hidden_ids().await;
                 self.refresh_privacy().await;
                 self.refresh_groups().await;
+                self.announce_presence();
+                self.resync_settings().await;
             }
             Event::PairSuccess(_) => self.set_state("connecting", ""),
             Event::LoggedOut(_) => self.set_state("logged_out", ""),
@@ -818,6 +826,9 @@ impl Account {
                             } else {
                                 w.set_name(chat, name);
                             }
+                        }
+                        if let Some(timer) = conversation.ephemeral_expiration.filter(|t| *t > 0) {
+                            w.exec("UPDATE chats SET ephemeral=?2 WHERE jid=?1", &[&chat, &timer]);
                         }
                         if bootstrap {
                             w.exec(

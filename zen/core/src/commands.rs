@@ -681,6 +681,26 @@ impl Account {
         self.send(json!({"type": "chats"}));
     }
 
+    /// Reads the account's synced settings from scratch, once: address-book
+    /// names, and which chats are pinned, muted or archived. They arrive as
+    /// the same events a change on another device would send. A device that
+    /// was linked before this core could take them in would otherwise never
+    /// see them, since afterwards only changes are sent.
+    pub(crate) async fn resync_settings(self: &Arc<Self>) {
+        use whatsapp_rust::sync_task::MajorSyncTask;
+        use whatsapp_rust::wacore::appstate::patch_decode::WAPatchName;
+        let marker = self.dir.join(".settings-synced-1");
+        if marker.exists() {
+            return;
+        }
+        let Ok(client) = self.client() else { return };
+        for name in [WAPatchName::CriticalBlock, WAPatchName::CriticalUnblockLow, WAPatchName::RegularLow, WAPatchName::RegularHigh, WAPatchName::Regular] {
+            client.process_sync_task(MajorSyncTask::AppStateSync { name, full_sync: true }).await;
+        }
+        let _ = std::fs::write(marker, b"");
+        self.send(json!({"type": "chats"}));
+    }
+
     /// Whether the user's own read receipts are off. WhatsApp then shows them
     /// nobody else's in one-to-one chats, so neither does this app; turning
     /// them off also takes back the blue ticks already shown there.
@@ -886,7 +906,7 @@ impl Account {
                 // -1 is "for good"; otherwise the time it ends, in seconds.
                 let until = match (update.action.muted.unwrap_or(false), update.action.mute_end_timestamp.unwrap_or(0)) {
                     (false, _) => 0,
-                    (true, end) if end <= 0 => -1,
+                    (true, end) if end < 0 => -1,
                     (true, end) => end / 1000,
                 };
                 self.db.write(|w| {

@@ -33,7 +33,29 @@ fn call(request: &str) -> String {
     }
 }
 
+/// With ZEN_LOG set, the protocol library's log lines go to stderr.
+struct Stderr;
+
+impl log::Log for Stderr {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Debug
+    }
+
+    fn log(&self, record: &log::Record) {
+        let filter = std::env::var("ZEN_LOG").unwrap_or_default();
+        if filter == "1" || record.target().contains(&filter) || record.args().to_string().to_lowercase().contains(&filter) {
+            eprintln!("log    {:<5} {} - {}", record.level(), record.target(), record.args());
+        }
+    }
+
+    fn flush(&self) {}
+}
+
 fn main() {
+    if std::env::var_os("ZEN_LOG").is_some() {
+        let _ = log::set_logger(&Stderr);
+        log::set_max_level(log::LevelFilter::Debug);
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (dir, stay) = (args.first().expect("data dir"), args.get(1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(5));
     let dir_c = CString::new(dir.as_str()).expect("dir");

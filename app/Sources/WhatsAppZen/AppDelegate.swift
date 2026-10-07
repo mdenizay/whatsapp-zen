@@ -365,7 +365,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             view.cacheDisplay(in: view.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: url)
         }
-        if ProcessInfo.processInfo.environment["WA_EMPTY"] == nil { store.open(store.chats.first?.jid) }
+        // WA_OPEN_JID opens that chat instead of the first one.
+        if let jid = ProcessInfo.processInfo.environment["WA_OPEN_JID"] {
+            store.open(jid)
+        } else if ProcessInfo.processInfo.environment["WA_EMPTY"] == nil {
+            store.open(store.chats.first?.jid)
+        }
         if ProcessInfo.processInfo.environment["WA_SPLIT"] != nil { store.splitChat = store.chats.dropFirst().first?.jid }
         DispatchQueue.main.asyncAfter(deadline: .now() + (Double(ProcessInfo.processInfo.environment["WA_DELAY"] ?? "") ?? 2)) { [self] in
             if let view = window.contentView?.superview { save(view, "main.png") }
