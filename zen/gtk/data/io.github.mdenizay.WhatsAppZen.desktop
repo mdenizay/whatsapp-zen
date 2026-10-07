@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=WhatsApp Zen
+Comment=A light, native WhatsApp client (unofficial)
+Comment[tr]=Hafif, yerli bir WhatsApp istemcisi (resmî değil)
+Exec=whatsapp-zen
+Icon=io.github.mdenizay.WhatsAppZen
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+Keywords=whatsapp;chat;messages;
+StartupNotify=true

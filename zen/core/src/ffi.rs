@@ -110,11 +110,19 @@ impl Core {
 #[no_mangle]
 pub unsafe extern "C" fn WAStart(data_dir: *const c_char, callback: Callback) {
     let base = PathBuf::from(CStr::from_ptr(data_dir).to_string_lossy().into_owned());
-    let emit: Emit = Arc::new(move |event: Value| {
-        if let Ok(text) = CString::new(event.to_string()) {
-            callback(text.as_ptr());
-        }
-    });
+    start(
+        base,
+        Arc::new(move |event: Value| {
+            if let Ok(text) = CString::new(event.to_string()) {
+                callback(text.as_ptr());
+            }
+        }),
+    );
+}
+
+/// The same as `WAStart`, for apps written in Rust: events arrive as JSON
+/// values, on threads of the core's own.
+pub fn start(base: PathBuf, emit: Emit) {
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).thread_name("zen-core").enable_all().build().expect("runtime");
     let core = Core { base, rt, emit, accounts: Mutex::new(HashMap::new()) };
     let _ = std::fs::create_dir_all(core.accounts_dir());
@@ -129,15 +137,20 @@ pub unsafe extern "C" fn WAStart(data_dir: *const c_char, callback: Callback) {
 #[no_mangle]
 pub unsafe extern "C" fn WACall(request: *const c_char) -> *mut c_char {
     let text = CStr::from_ptr(request).to_string_lossy();
-    let reply = match (CORE.get(), serde_json::from_str::<Request>(&text)) {
+    CString::new(call(&text).to_string()).unwrap_or_default().into_raw()
+}
+
+/// The same as `WACall`, for apps written in Rust. It may block (sending
+/// waits for the network), so keep it off a UI thread.
+pub fn call(text: &str) -> Value {
+    match (CORE.get(), serde_json::from_str::<Request>(&text)) {
         (None, _) => json!({"error": "the core has not been started"}),
         (_, Err(error)) => json!({"error": error.to_string()}),
         (Some(core), Ok(request)) => match core.call(&request) {
             Ok(data) => json!({"ok": true, "data": data}),
             Err(error) => json!({"error": error}),
         },
-    };
-    CString::new(reply.to_string()).unwrap_or_default().into_raw()
+    }
 }
 
 /// # Safety
