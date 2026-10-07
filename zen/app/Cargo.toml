@@ -1,0 +1,12 @@
+[package]
+name = "zen-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+async-channel = { version = "2", default-features = false }
+dirs = "6"
+gpui-kit = "0.7.1"
+qrcode = { version = "0.14", default-features = false }
+zen-core = { version = "0.1.0", path = "../core" }
