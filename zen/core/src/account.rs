@@ -71,6 +71,51 @@ pub struct Account {
     pub(crate) available: std::sync::atomic::AtomicBool,
     /// Per chat, the oldest message history was last asked from, and when.
     pub(crate) history_asked: Mutex<std::collections::HashMap<String, (String, std::time::Instant)>>,
+    /// Ringing calls by id: who is calling and who started the call.
+    pub(crate) calls: Mutex<std::collections::HashMap<String, (Jid, Jid)>>,
+    /// The user's own read receipts are off.
+    pub(crate) hide_read: std::sync::atomic::AtomicBool,
+    /// Messages whose media is being fetched right now.
+    downloading: Mutex<std::collections::HashSet<String>>,
+}
+
+/// Takes a message off the list of running downloads when it goes out of scope.
+struct Finished<'a>(&'a Mutex<std::collections::HashSet<String>>, String);
+
+impl Drop for Finished<'_> {
+    fn drop(&mut self) {
+        self.0.lock().unwrap().remove(&self.1);
+    }
+}
+
+/// A file that counts what is written to it, for download progress.
+struct Counting {
+    file: std::fs::File,
+    written: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl std::io::Write for Counting {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        let n = self.file.write(data)?;
+        self.written.fetch_add(n as u64, std::sync::atomic::Ordering::Relaxed);
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()
+    }
+}
+
+impl std::io::Seek for Counting {
+    fn seek(&mut self, to: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.file.seek(to)
+    }
+}
+
+impl whatsapp_rust::wacore::download::DownloadWriter for Counting {
+    fn truncate(&mut self, len: u64) -> std::io::Result<()> {
+        self.file.set_len(len)
+    }
 }
 
 impl Account {
@@ -90,6 +135,9 @@ impl Account {
             emit,
             available: std::sync::atomic::AtomicBool::new(false),
             history_asked: Mutex::new(Default::default()),
+            calls: Mutex::new(Default::default()),
+            hide_read: std::sync::atomic::AtomicBool::new(false),
+            downloading: Mutex::new(Default::default()),
         });
         let me = account.clone();
         account.rt.spawn(async move {
@@ -204,7 +252,8 @@ impl Account {
             "send_image" | "send_file" | "forward" | "pin_message" | "delete_for_me" | "fetch_history" | "group_info" | "group_update"
             | "group_rename" | "group_leave" | "group_link" | "typing" | "presence" | "subscribe" | "subscribe_presence" | "contacts"
             | "start_chat" | "logout" | "block" | "cache_size" | "cache_list" | "cache_remove" | "clear_cache" | "reject_call" | "set_ephemeral"
-            | "send_poll" | "vote" | "send_contact" | "send_location" | "chat_media" | "statuses" | "stickers" | "user_info" | "export" => self.more(r),
+            | "send_poll" | "vote" | "send_contact" | "send_location" | "chat_media" | "statuses" | "stickers" | "user_info" | "export" | "send_voice"
+            | "send_sticker_image" => self.more(r),
             "star" => self.star(&r.chat, &r.id, r.on),
             "mark_read" => {
                 self.mark_read(&r.chat);
@@ -241,7 +290,26 @@ impl Account {
                 ..Default::default()
             },
         };
-        self.deliver(row, move |_| async move { Ok(message) })
+        let (db_chat, db_id, account) = (row.chat.clone(), row.id.clone(), self.clone());
+        let link_text = message.text_content().unwrap_or_default().to_string();
+        self.deliver(row, move |_| async move {
+            // A link gets its title, description and picture, like the phone adds.
+            let preview = tokio::task::spawn_blocking(move || crate::media::link_preview(&link_text)).await.ok().flatten();
+            let Some(preview) = preview else { return Ok(message) };
+            account.db.write(|w| {
+                w.exec("UPDATE messages SET link_title=?3, link_desc=?4, thumb=COALESCE(?5, thumb) WHERE chat=?1 AND id=?2", &[&db_chat, &db_id, &preview.title, &preview.description, &preview.thumb])
+            });
+            let mut message = message;
+            let text = message.text_content().unwrap_or_default().to_string();
+            let mut extended = message.extended_text_message.take().unwrap_or_else(|| wa::message::ExtendedTextMessage { text: Some(text), ..Default::default() });
+            extended.matched_text = Some(preview.url);
+            extended.title = Some(preview.title);
+            extended.description = Some(preview.description);
+            extended.jpeg_thumbnail = preview.thumb.map(Into::into);
+            message.conversation = None;
+            message.extended_text_message = MessageField::some(extended);
+            Ok(message)
+        })
     }
 
     /// The key that names a stored message to the protocol.
@@ -295,14 +363,21 @@ impl Account {
         Ok(Value::Null)
     }
 
-    /// Fetches a message's media file, once, and returns where it is.
+    /// Fetches a message's media file, once, and returns where it is. The
+    /// file goes straight to disk, and a large one reports how far it is.
     fn download(&self, chat: &str, id: &str) -> Result<String, String> {
-        let (raw, kind, file_name, path) = self
-            .db
-            .get("SELECT raw, type, file_name, media_path FROM messages WHERE chat=?1 AND id=?2", &[&chat, &id], |r| {
+        use whatsapp_rust::download::Downloadable;
+        let stored = |me: &Self| {
+            me.db.get("SELECT raw, type, file_name, media_path FROM messages WHERE chat=?1 AND id=?2", &[&chat, &id], |r| {
                 Ok((r.get::<_, Option<Vec<u8>>>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
             })
-            .ok_or("unknown message")?;
+        };
+        // One download per message, however many views ask for it at once.
+        while !self.downloading.lock().unwrap().insert(id.to_string()) {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+        let _guard = Finished(&self.downloading, id.to_string());
+        let (raw, kind, file_name, path) = stored(self).ok_or("unknown message")?;
         if !path.is_empty() && std::path::Path::new(&path).exists() {
             return Ok(path);
         }
@@ -318,26 +393,49 @@ impl Account {
             _ => "",
         }
         .to_string();
-        let data = if let Some(media) = base.image_message.as_option() {
+        let (media, total): (&dyn Downloadable, u64) = if let Some(media) = base.image_message.as_option() {
             if media.mimetype.as_deref().is_some_and(|m| m.contains("png")) {
                 ext = ".png".into();
             }
-            self.rt.block_on(client.download(media))
-        } else if let Some(media) = base.video_message.as_option() {
-            self.rt.block_on(client.download(media))
+            (media, media.file_length.unwrap_or(0))
+        } else if let Some(media) = base.video_message.as_option().or(base.ptv_message.as_option()) {
+            (media, media.file_length.unwrap_or(0))
         } else if let Some(media) = base.audio_message.as_option() {
-            self.rt.block_on(client.download(media))
+            (media, media.file_length.unwrap_or(0))
         } else if let Some(media) = base.document_message.as_option() {
             ext = std::path::Path::new(&file_name).extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
-            self.rt.block_on(client.download(media))
+            (media, media.file_length.unwrap_or(0))
         } else if let Some(media) = base.sticker_message.as_option() {
-            self.rt.block_on(client.download(media))
+            (media, media.file_length.unwrap_or(0))
         } else {
             return Err("this message has no media".into());
-        }
-        .map_err(|e| e.to_string())?;
+        };
         let file = self.dir.join("media").join(format!("{}{ext}", safe_name(id)));
-        std::fs::write(&file, data).map_err(|e| e.to_string())?;
+        let part = file.with_extension("part");
+        let written = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let writer = Counting { file: std::fs::File::create(&part).map_err(|e| e.to_string())?, written: written.clone() };
+        let reports = total > 512 << 10;
+        let progress = reports.then(|| {
+            let (emit, account, chat, id, written) = (self.emit.clone(), self.id.clone(), chat.to_string(), id.to_string(), written.clone());
+            self.rt.spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                    let done = written.load(std::sync::atomic::Ordering::Relaxed).min(total);
+                    emit(json!({"account": account, "type": "download", "chat": chat, "id": id, "done": done, "total": total}));
+                }
+            })
+        });
+        let result = self.rt.block_on(client.download_to_writer(media, writer));
+        if let Some(progress) = progress {
+            progress.abort();
+            // Tells the views the bar can go, whether or not it worked.
+            self.send(json!({"type": "download", "chat": chat, "id": id, "done": total, "total": total, "finished": true}));
+        }
+        if let Err(error) = result {
+            let _ = std::fs::remove_file(&part);
+            return Err(error.to_string());
+        }
+        std::fs::rename(&part, &file).map_err(|e| e.to_string())?;
         let file = file.to_string_lossy().into_owned();
         self.db.write(|w| w.exec("UPDATE messages SET media_path=?3 WHERE chat=?1 AND id=?2", &[&chat, &id, &file]));
         Ok(file)
@@ -570,6 +668,8 @@ impl Account {
                 self.set_state("connected", "");
                 self.send(json!({"type": "chats"}));
                 self.repair_hidden_ids().await;
+                self.refresh_privacy().await;
+                self.refresh_groups().await;
             }
             Event::PairSuccess(_) => self.set_state("connecting", ""),
             Event::LoggedOut(_) => self.set_state("logged_out", ""),
@@ -653,6 +753,8 @@ impl Account {
                 use whatsapp_rust::wacore::types::presence::ReceiptType;
                 let chat = self.pn(&receipt.source.chat).await;
                 let to = match receipt.r#type {
+                    // With our own read receipts off, one-to-one chats show nobody else's.
+                    ReceiptType::Read if self.hide_read.load(std::sync::atomic::Ordering::Relaxed) && !chat.ends_with("@g.us") => status::DELIVERED,
                     ReceiptType::Read => status::READ,
                     // "Played" is sent whatever the other side's read-receipt setting, and is not a blue tick.
                     ReceiptType::Delivered | ReceiptType::Played => status::DELIVERED,
@@ -813,20 +915,20 @@ pub(crate) fn row(chat: &str, id: &str, sender: &str, from_me: bool, ts: i64, me
         out.thumb = video.jpeg_thumbnail.as_ref().map(|t| t.to_vec());
     } else if let Some(contact) = base.contact_message.as_option() {
         out.kind = "other".into();
-        out.text = format!("👤 Contact: {}", contact.display_name.as_deref().unwrap_or(""));
+        out.text = format!("👤 {}: {}", crate::i18n::t("Contact"), contact.display_name.as_deref().unwrap_or(""));
     } else if base.contacts_array_message.is_set() {
         out.kind = "other".into();
-        out.text = "👤 Contacts".into();
+        out.text = format!("👤 {}", crate::i18n::t("Contacts"));
     } else if let Some(place) = base.location_message.as_option() {
         out.kind = "other".into();
         out.text = match place.name.as_deref().filter(|name| !name.is_empty()) {
-            Some(name) => format!("📍 Location: {name}"),
-            None => "📍 Location".into(),
+            Some(name) => format!("📍 {}: {name}", crate::i18n::t("Location")),
+            None => format!("📍 {}", crate::i18n::t("Location")),
         };
         out.text += &format!("\nhttps://maps.apple.com/?ll={:.6},{:.6}", place.degrees_latitude.unwrap_or(0.0), place.degrees_longitude.unwrap_or(0.0));
     } else if base.live_location_message.is_set() {
         out.kind = "other".into();
-        out.text = "📍 Live location".into();
+        out.text = format!("📍 {}", crate::i18n::t("Live location"));
     } else if let Some(poll) = [&base.poll_creation_message, &base.poll_creation_message_v2, &base.poll_creation_message_v3].into_iter().find_map(|p| p.as_option()) {
         context = poll.context_info.as_option();
         out.kind = "poll".into();
@@ -847,10 +949,10 @@ pub(crate) fn row(chat: &str, id: &str, sender: &str, from_me: bool, ts: i64, me
         }
     } else if let Some(invite) = base.group_invite_message.as_option() {
         out.kind = "other".into();
-        out.text = format!("✉️ Group invite: {}", invite.group_name.as_deref().unwrap_or(""));
+        out.text = format!("✉️ {}: {}", crate::i18n::t("Group invite"), invite.group_name.as_deref().unwrap_or(""));
     } else if base.call.is_set() {
         out.kind = "other".into();
-        out.text = "📞 Call".into();
+        out.text = format!("📞 {}", crate::i18n::t("Call"));
     } else {
         return None;
     }

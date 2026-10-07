@@ -11,6 +11,7 @@ crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 log = "0.4.34"
 rusqlite = "0.39"
 serde = { version = "1", features = ["derive"] }

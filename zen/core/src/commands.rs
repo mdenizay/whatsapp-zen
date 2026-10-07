@@ -212,7 +212,7 @@ impl Account {
             "send_contact" => {
                 let name = if r.text.is_empty() { self.db.name_of(&r.jid) } else { r.text.clone() };
                 let user = jid(&r.jid)?.user.to_string();
-                let row = self.new_row(&r.chat, "other", &format!("👤 Contact: {name}"))?;
+                let row = self.new_row(&r.chat, "other", &format!("👤 {}: {name}", crate::i18n::t("Contact")))?;
                 let message = wa::Message {
                     contact_message: MessageField::some(wa::message::ContactMessage {
                         display_name: Some(name.clone()),
@@ -224,7 +224,7 @@ impl Account {
                 self.deliver(row, move |_| async move { Ok(message) })
             }
             "send_location" => {
-                let row = self.new_row(&r.chat, "other", &format!("📍 Location\nhttps://maps.apple.com/?ll={:.6},{:.6}", r.lat, r.lng))?;
+                let row = self.new_row(&r.chat, "other", &format!("📍 {}\nhttps://maps.apple.com/?ll={:.6},{:.6}", crate::i18n::t("Location"), r.lat, r.lng))?;
                 let message = wa::Message {
                     location_message: MessageField::some(wa::message::LocationMessage {
                         degrees_latitude: Some(r.lat),
@@ -259,7 +259,14 @@ impl Account {
                 Ok(json!({"about": about.unwrap_or_default(), "blocked": blocked}))
             }
             "export" => self.export(&r.chat, &r.path),
-            "reject_call" => Err("Declining calls is not available in the Rust core yet".into()),
+            "send_voice" => self.send_voice(r),
+            "send_sticker_image" => self.send_sticker(&r.chat, &r.path),
+            "reject_call" => {
+                let client = self.client()?;
+                let (peer, creator) = self.calls.lock().unwrap().get(&r.id).cloned().ok_or("That call is no longer ringing")?;
+                self.rt.block_on(client.voip().reject_call(&r.id, &peer, &creator)).map_err(|e| e.to_string())?;
+                Ok(Value::Null)
+            }
             other => Err(format!("\"{other}\" is not available in the Rust core yet")),
         }
     }
@@ -534,7 +541,7 @@ impl Account {
             if is_me {
                 i_am_admin = admin;
             }
-            members.push((if is_me { "You".to_string() } else { self.db.name_of(&id) }, id, admin, is_me));
+            members.push((if is_me { crate::i18n::t("You") } else { self.db.name_of(&id) }, id, admin, is_me));
         }
         // Admins first, then by name.
         members.sort_by(|a, b| (!a.2, a.0.to_lowercase()).cmp(&(!b.2, b.0.to_lowercase())));
@@ -585,6 +592,113 @@ impl Account {
         self.db.write(|w| w.touch_chat(&chat, now()));
         self.send(json!({"type": "chats"}));
         Ok(Value::String(chat))
+    }
+
+    /// Sends a recording as a voice message. The UI records Opus in a CAF
+    /// file (all macOS can encode); WhatsApp wants Ogg, so it is re-wrapped.
+    fn send_voice(self: &Arc<Self>, r: &Request) -> Result<Value, String> {
+        let caf = std::fs::read(&r.path).map_err(|e| e.to_string())?;
+        let data = crate::ogg::caf_opus_to_ogg(&caf)?;
+        let mut row = self.new_row(&r.chat, "audio", "")?;
+        row.w = r.seconds;
+        let copy = self.dir.join("media").join(format!("{}.ogg", safe_name(&row.id)));
+        let media_path = std::fs::write(&copy, &data).is_ok().then(|| copy.to_string_lossy().into_owned()).unwrap_or_default();
+        let context = self.reply_context(&mut row, &r.reply_to);
+        let (chat, id, seconds) = (row.chat.clone(), row.id.clone(), r.seconds as u32);
+        self.deliver(row, move |client| async move {
+            let up = client.upload(data, MediaType::Audio, UploadOptions::default()).await.map_err(|e| e.to_string())?;
+            Ok(wa::Message {
+                audio_message: MessageField::some(wa::message::AudioMessage {
+                    url: Some(up.url),
+                    direct_path: Some(up.direct_path),
+                    media_key: Some(up.media_key.to_vec().into()),
+                    mimetype: Some("audio/ogg; codecs=opus".into()),
+                    file_enc_sha256: Some(up.file_enc_sha256.to_vec().into()),
+                    file_sha256: Some(up.file_sha256.to_vec().into()),
+                    file_length: Some(up.file_length),
+                    seconds: Some(seconds),
+                    ptt: Some(true),
+                    context_info: context.map(MessageField::some).unwrap_or_default(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+        })?;
+        if !media_path.is_empty() {
+            self.db.write(|w| w.exec("UPDATE messages SET media_path=?3 WHERE chat=?1 AND id=?2", &[&chat, &id, &media_path]));
+        }
+        serde_json::to_value(self.db.message(&chat, &id)).map_err(|e| e.to_string())
+    }
+
+    /// Turns a PNG prepared by the UI (square, transparent padding) into a
+    /// WebP sticker and sends it.
+    fn send_sticker(self: &Arc<Self>, chat: &str, path: &str) -> Result<Value, String> {
+        let (data, side) = crate::media::sticker(&std::fs::read(path).map_err(|e| e.to_string())?)?;
+        let mut row = self.new_row(chat, "sticker", "")?;
+        row.w = side as i64;
+        row.h = side as i64;
+        let copy = self.dir.join("media").join(format!("{}.webp", safe_name(&row.id)));
+        let media_path = std::fs::write(&copy, &data).is_ok().then(|| copy.to_string_lossy().into_owned()).unwrap_or_default();
+        let (chat, id) = (row.chat.clone(), row.id.clone());
+        self.deliver(row, move |client| async move {
+            let up = client.upload(data, MediaType::Sticker, UploadOptions::default()).await.map_err(|e| e.to_string())?;
+            Ok(wa::Message {
+                sticker_message: MessageField::some(wa::message::StickerMessage {
+                    url: Some(up.url),
+                    direct_path: Some(up.direct_path),
+                    media_key: Some(up.media_key.to_vec().into()),
+                    mimetype: Some("image/webp".into()),
+                    file_enc_sha256: Some(up.file_enc_sha256.to_vec().into()),
+                    file_sha256: Some(up.file_sha256.to_vec().into()),
+                    file_length: Some(up.file_length),
+                    width: Some(side),
+                    height: Some(side),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+        })?;
+        if !media_path.is_empty() {
+            self.db.write(|w| w.exec("UPDATE messages SET media_path=?3 WHERE chat=?1 AND id=?2", &[&chat, &id, &media_path]));
+        }
+        serde_json::to_value(self.db.message(&chat, &id)).map_err(|e| e.to_string())
+    }
+
+    /// Lists the groups the account is in, so one that has been quiet since
+    /// before this device was linked still shows in the chat list.
+    pub(crate) async fn refresh_groups(&self) {
+        let Ok(client) = self.client() else { return };
+        let Ok(groups) = client.groups().get_participating().await else { return };
+        self.db.write(|w| {
+            for (id, group) in &groups {
+                let chat = id.to_non_ad().to_string();
+                w.touch_chat(&chat, group.creation_time.unwrap_or(1) as i64);
+                if !group.subject.is_empty() {
+                    w.exec("UPDATE chats SET name=?2 WHERE jid=?1", &[&chat, &group.subject]);
+                }
+            }
+        });
+        self.send(json!({"type": "chats"}));
+    }
+
+    /// Whether the user's own read receipts are off. WhatsApp then shows them
+    /// nobody else's in one-to-one chats, so neither does this app; turning
+    /// them off also takes back the blue ticks already shown there.
+    pub(crate) async fn refresh_privacy(&self) {
+        use whatsapp_rust::wacore::iq::privacy::{PrivacyCategory, PrivacyValue};
+        let Ok(client) = self.client() else { return };
+        let Ok(settings) = client.fetch_privacy_settings().await else { return };
+        let off = matches!(settings.get_value(&PrivacyCategory::ReadReceipts), Some(PrivacyValue::None));
+        self.hide_read.store(off, Ordering::Relaxed);
+        if off {
+            let changed = self.db.write(|w| {
+                w.exec("UPDATE messages SET status=?1 WHERE status=?2 AND from_me=1 AND chat NOT LIKE '%@g.us'", &[&status::DELIVERED, &status::READ])
+            });
+            if changed > 0 {
+                self.send(json!({"type": "messages", "chat": ""}));
+                self.send(json!({"type": "chats"}));
+            }
+        }
     }
 
     fn set_ephemeral(&self, chat: &str, seconds: u32) -> Result<Value, String> {
@@ -683,7 +797,7 @@ impl Account {
             let who = self.pn(&parsed).await;
             let name = if who == me {
                 row.mentions_me = true;
-                "You".to_string()
+                crate::i18n::t("You")
             } else {
                 self.db.name_of(&who)
             };
@@ -695,7 +809,7 @@ impl Account {
     fn export(&self, chat: &str, path: &str) -> Result<Value, String> {
         let mut out = String::new();
         for message in self.db.query("chat=?1 AND deleted=0 ORDER BY ts, id", &[&chat]) {
-            let who = if message.from_me { "You".to_string() } else { message.sender_name.clone() };
+            let who = if message.from_me { crate::i18n::t("You") } else { message.sender_name.clone() };
             let label = preview(&message.kind, "", &message.file_name);
             let body = match message.kind.as_str() {
                 "text" | "other" | "poll" => message.text.clone(),
@@ -791,6 +905,62 @@ impl Account {
                 let chat = self.pn(&update.chat_jid).await;
                 self.remove_message(&chat, &update.message_id);
             }
+            Event::IncomingCall(call) => {
+                use whatsapp_rust::wacore::types::call::CallAction;
+                // Calls cannot be answered here; say who is calling and let it be declined.
+                let (id, creator, video) = match &call.action {
+                    CallAction::Offer { call_id, call_creator, is_video, .. } => (call_id, call_creator, *is_video),
+                    CallAction::OfferNotice { call_id, call_creator, is_video, .. } => (call_id, call_creator, *is_video),
+                    _ => return,
+                };
+                if call.offline {
+                    return;
+                }
+                self.calls.lock().unwrap().insert(id.clone(), (call.from.clone(), creator.clone()));
+                let who = self.pn(&call.from).await;
+                self.send(json!({"type": "call", "name": self.db.name_of(&who), "video": video, "raw_jid": call.from.to_string(), "id": id}));
+            }
+            Event::UndecryptableMessage(lost) => {
+                use whatsapp_rust::wacore::types::events::UnavailableType;
+                // A view-once message, which only the phone can open: leave a note in its place.
+                if !lost.is_unavailable || lost.unavailable_type != UnavailableType::ViewOnce {
+                    return;
+                }
+                let info = &lost.info;
+                let chat = self.pn(&info.source.chat).await;
+                if chat.ends_with("@broadcast") || chat.ends_with("@newsletter") {
+                    return;
+                }
+                let from_me = info.source.is_from_me;
+                let row = NewMessage {
+                    chat: chat.clone(),
+                    id: info.id.to_string(),
+                    sender: if from_me { String::new() } else { self.pn(&info.source.sender).await },
+                    from_me,
+                    ts: info.timestamp.timestamp(),
+                    kind: "other".into(),
+                    text: format!("👁 {}", crate::i18n::t("View-once message. Open it on your phone.")),
+                    unread: !from_me,
+                    status: status::SENT,
+                    ..Default::default()
+                };
+                let fresh = self.db.write(|w| {
+                    if !w.insert_message(&row) {
+                        return false;
+                    }
+                    w.touch_chat(&chat, row.ts);
+                    if !from_me {
+                        w.exec("UPDATE chats SET unread=unread+1 WHERE jid=?1", &[&chat]);
+                    }
+                    true
+                });
+                if fresh {
+                    self.send(json!({
+                        "type": "message", "chat": chat, "chat_name": self.db.name_of(&chat), "msg": self.db.message(&chat, &row.id),
+                        "notify": !from_me && now() - row.ts < 120 && !self.db.is_muted(&chat),
+                    }));
+                }
+            }
             Event::MarkChatAsReadUpdate(update) => {
                 let chat = self.pn(&update.jid).await;
                 self.db.write(|w| {
@@ -813,11 +983,12 @@ impl Account {
 /// One line that stands for a message where its content cannot be shown.
 pub(crate) fn preview(kind: &str, text: &str, file_name: &str) -> String {
     match kind {
-        "image" => if text.is_empty() { "📷 Photo".into() } else { format!("📷 {text}") },
-        "video" => if text.is_empty() { "🎥 Video".into() } else { format!("🎥 {text}") },
-        "audio" => "🎤 Voice message".into(),
-        "sticker" => "Sticker".into(),
-        "document" => if file_name.is_empty() { "📄 Document".into() } else { format!("📄 {file_name}") },
+        _ if !text.is_empty() => text.to_string(),
+        "image" => format!("📷 {}", crate::i18n::t("Photo")),
+        "video" => format!("🎥 {}", crate::i18n::t("Video")),
+        "audio" => format!("🎤 {}", crate::i18n::t("Voice message")),
+        "sticker" => crate::i18n::t("Sticker"),
+        "document" => format!("📄 {file_name}"),
         _ => text.to_string(),
     }
 }

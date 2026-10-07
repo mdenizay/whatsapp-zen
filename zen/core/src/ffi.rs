@@ -53,12 +53,19 @@ impl Core {
 
     fn call(&self, request: &Request) -> Result<Value, String> {
         match request.cmd.as_str() {
-            // The Rust core's own messages are in English for now.
-            "set_lang" => Ok(Value::Null),
+            "set_lang" => {
+                crate::i18n::set_language(&request.text);
+                Ok(Value::Null)
+            }
             "accounts" => Ok(json!(self.list())),
             "open_account" => self.open(&request.account).map(|_| Value::Null),
             "remove_account" => {
                 let account = self.accounts.lock().unwrap().remove(&request.account).ok_or("unknown account")?;
+                if request.unlink {
+                    // Also removes this device from the phone's list.
+                    let _ = account.dispatch(&Request { cmd: "logout".into(), ..Default::default() });
+                    std::thread::sleep(std::time::Duration::from_millis(800));
+                }
                 std::fs::remove_dir_all(&account.dir).map_err(|e| e.to_string())?;
                 Ok(Value::Null)
             }
