@@ -1,0 +1,67 @@
+# Builds WhatsApp Zen for Windows: the Rust core as zen_core.dll and the
+# WinUI 3 app in zen/windows, published as one self-contained folder. When
+# started for a tag it publishes a zip of that folder as a pre-release, which
+# stays out of /releases/latest (read by the macOS app's updater).
+name: Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish to, e.g. windows-v0.1.0 (empty: build only)"
+        required: false
+  pull_request:
+    paths: ["zen/**", ".github/workflows/windows.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: zen
+
+      - name: Core (zen_core.dll)
+        working-directory: zen
+        env: { LIBOPUS_STATIC: "1", LIBOPUS_NO_PKG: "1", CMAKE_POLICY_VERSION_MINIMUM: "3.5" }
+        run: cargo rustc --release -p zen-core --lib --crate-type cdylib
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: App
+        working-directory: zen/windows
+        run: dotnet publish WhatsAppZen.csproj -c Release -r win-x64 -p:Platform=x64 -o publish
+
+      - name: Package
+        shell: pwsh
+        working-directory: zen/windows
+        run: |
+          [xml]$project = Get-Content WhatsAppZen.csproj
+          $version = $project.Project.PropertyGroup.Version | Select-Object -First 1
+          Copy-Item README-windows.md publish/README.md
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path publish/* -DestinationPath "dist/WhatsApp-Zen-$version-windows-x64.zip"
+          Get-ChildItem dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: whatsapp-zen-windows
+          path: zen/windows/dist/*.zip
+
+      - name: Publish
+        if: ${{ inputs.tag != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${{ inputs.tag }}" >/dev/null 2>&1 || \
+            gh release create "${{ inputs.tag }}" --prerelease --title "WhatsApp Zen for Windows ${{ inputs.tag }}" --notes-file zen/windows/README-windows.md
+          gh release upload "${{ inputs.tag }}" zen/windows/dist/*.zip --clobber
