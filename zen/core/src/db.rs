@@ -315,6 +315,27 @@ impl Db {
         rows.map(|rows| rows.flatten().collect()).unwrap_or_default()
     }
 
+    /// One row, read by `map`; `None` when there is none.
+    pub fn get<T>(&self, sql: &str, args: &[&dyn rusqlite::ToSql], map: impl FnOnce(&Row) -> rusqlite::Result<T>) -> Option<T> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(sql, args, map).optional().ok().flatten()
+    }
+
+    /// Every hidden id ("…@lid") the database still refers to.
+    pub fn hidden_ids(&self) -> Vec<String> {
+        let conn = self.conn.lock().unwrap();
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT jid FROM chats WHERE jid LIKE '%@lid'
+             UNION SELECT DISTINCT chat FROM messages WHERE chat LIKE '%@lid'
+             UNION SELECT DISTINCT sender FROM messages WHERE sender LIKE '%@lid'
+             UNION SELECT jid FROM names WHERE jid LIKE '%@lid'",
+        ) else {
+            return Vec::new();
+        };
+        let rows = stmt.query_map([], |r| r.get(0));
+        rows.map(|rows| rows.flatten().collect()).unwrap_or_default()
+    }
+
     pub fn is_muted(&self, chat: &str) -> bool {
         self.count("SELECT (muted_until < 0 OR muted_until > strftime('%s','now')) FROM chats WHERE jid=?1", &[&chat]) != 0
     }

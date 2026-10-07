@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use whatsapp_rust::prelude::*;
+use whatsapp_rust::waproto::buffa::{Message as _, MessageField};
 use whatsapp_rust::waproto::whatsapp as wa;
 
 use crate::db::{status, Db, NewMessage};
@@ -31,6 +32,8 @@ pub struct Request {
     pub before_id: String,
     pub ts: i64,
     pub unlink: bool,
+    pub emoji: String,
+    pub seconds: i64,
 }
 
 struct Status {
@@ -87,7 +90,7 @@ impl Account {
             })
             .on_event(move |event, _client| {
                 let me = on_event.clone();
-                async move { me.handle(&event) }
+                async move { me.handle(&event).await }
             })
             .build()
             .await
@@ -105,9 +108,14 @@ impl Account {
         (self.emit)(event);
     }
 
+    /// Our own phone-number id, once linked.
+    fn me(&self) -> String {
+        self.client().ok().and_then(|client| client.pn()).map(|jid| jid.to_non_ad().to_string()).unwrap_or_default()
+    }
+
     fn state_json(&self) -> Value {
         let status = self.status.lock().unwrap();
-        json!({"type": "state", "state": status.state, "qr": status.qr, "me": ""})
+        json!({"type": "state", "state": status.state, "qr": status.qr, "me": self.me()})
     }
 
     fn set_state(&self, state: &'static str, qr: &str) {
@@ -154,14 +162,22 @@ impl Account {
                 "SELECT COUNT(*) FROM messages WHERE chat=?1 AND ts >= (SELECT ts FROM messages WHERE chat=?1 AND id=?2)",
                 &[&r.chat, &r.id],
             ))),
-            "send_text" => self.send_text(&r.chat, &r.text),
+            "send_text" => self.send_text(&r.chat, &r.text, &r.reply_to),
+            "react" => self.react(&r.chat, &r.id, &r.emoji),
+            "revoke" => self.revoke(&r.chat, &r.id),
+            "edit" => self.edit(&r.chat, &r.id, &r.text),
+            "download" => self.download(&r.chat, &r.id).map(Value::String),
+            "avatar" => Ok(Value::String(self.avatar(if r.jid.is_empty() { &r.chat } else { &r.jid }))),
+            "archive" => self.chat_action(&r.chat, "archived", r.on),
+            "pin_chat" => self.chat_action(&r.chat, "pinned", r.on),
+            "mute" => self.mute(&r.chat, r.seconds),
+            "star" => self.star(&r.chat, &r.id, r.on),
             "mark_read" => {
                 self.mark_read(&r.chat);
                 Ok(Value::Null)
             }
             // Asked for constantly and harmless to leave for later.
             "presence" | "subscribe" | "typing" | "fetch_history" => Ok(Value::Null),
-            "avatar" => Ok(json!("")),
             "contacts" | "statuses" | "stickers" | "chat_media" | "cache_list" => Ok(json!([])),
             "cache_size" => Ok(json!(0)),
             other => Err(format!("\"{other}\" is not available in the Rust core yet")),
@@ -170,7 +186,7 @@ impl Account {
 
     /// Sends a text. It shows at once as pending and settles when the server
     /// has taken it.
-    fn send_text(self: &Arc<Self>, chat: &str, text: &str) -> Result<Value, String> {
+    fn send_text(self: &Arc<Self>, chat: &str, text: &str, reply_to: &str) -> Result<Value, String> {
         let text = text.trim().to_string();
         if text.is_empty() {
             return Err("empty message".into());
@@ -179,6 +195,29 @@ impl Account {
         let jid: Jid = chat.parse().map_err(|_| "bad chat id".to_string())?;
         let now = now();
         let pending = format!("pending-{}", now_nanos());
+        // What is being answered, for the quote above the reply.
+        let quoted = (!reply_to.is_empty())
+            .then(|| self.db.get("SELECT sender, from_me, text, type FROM messages WHERE chat=?1 AND id=?2", &[&chat, &reply_to], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+            }))
+            .flatten();
+        let me = self.me();
+        let outgoing = match &quoted {
+            None => wa::Message::text(text.clone()),
+            Some((sender, from_me, quoted_text, _)) => wa::Message {
+                extended_text_message: MessageField::some(wa::message::ExtendedTextMessage {
+                    text: Some(text.clone()),
+                    context_info: MessageField::some(wa::ContextInfo {
+                        stanza_id: Some(reply_to.to_string()),
+                        participant: Some(if *from_me { me.clone() } else if sender.is_empty() { chat.to_string() } else { sender.clone() }),
+                        quoted_message: MessageField::some(wa::Message { conversation: Some(quoted_text.clone()), ..Default::default() }),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        };
         self.db.write(|w| {
             w.touch_chat(chat, now);
             w.insert_message(&NewMessage {
@@ -189,6 +228,9 @@ impl Account {
                 kind: "text".into(),
                 text: text.clone(),
                 status: status::PENDING,
+                quoted_id: reply_to.to_string(),
+                quoted_text: quoted.as_ref().map(|q| q.2.clone()).unwrap_or_default(),
+                quoted_sender: quoted.as_ref().map(|q| if q.1 { me.clone() } else { q.0.clone() }).unwrap_or_default(),
                 ..Default::default()
             });
             // Writing in a chat means having read it.
@@ -200,7 +242,7 @@ impl Account {
         let me = self.clone();
         let chat = chat.to_string();
         self.rt.spawn(async move {
-            match client.send_message(jid, wa::Message::text(text)).await {
+            match client.send_message(jid, outgoing).await {
                 Ok(sent) => {
                     let id = sent.message_id.to_string();
                     me.db.write(|w| {
@@ -214,6 +256,198 @@ impl Account {
             me.changed(&chat);
         });
         serde_json::to_value(shown).map_err(|e| e.to_string())
+    }
+
+    /// The key that names a stored message to the protocol.
+    fn key(&self, chat: &str, id: &str) -> Result<(wa::MessageKey, String, bool), String> {
+        let (sender, from_me) = self
+            .db
+            .get("SELECT sender, from_me FROM messages WHERE chat=?1 AND id=?2", &[&chat, &id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?)))
+            .ok_or("unknown message")?;
+        let key = wa::MessageKey {
+            remote_jid: Some(chat.to_string()),
+            from_me: Some(from_me),
+            id: Some(id.to_string()),
+            participant: (chat.ends_with("@g.us") && !from_me).then(|| sender.clone()),
+            ..Default::default()
+        };
+        Ok((key, sender, from_me))
+    }
+
+    /// Sets our reaction on a message; an empty emoji takes it back.
+    fn react(&self, chat: &str, id: &str, emoji: &str) -> Result<Value, String> {
+        let client = self.client()?;
+        let jid: Jid = chat.parse().map_err(|_| "bad chat id".to_string())?;
+        let (key, _, _) = self.key(chat, id)?;
+        self.rt.block_on(client.send_reaction(jid, key, emoji)).map_err(|e| e.to_string())?;
+        self.db.write(|w| set_reaction(w, chat, id, "", emoji));
+        self.send(json!({"type": "messages", "chat": chat}));
+        Ok(Value::Null)
+    }
+
+    /// Deletes one of our messages for everyone.
+    fn revoke(&self, chat: &str, id: &str) -> Result<Value, String> {
+        let client = self.client()?;
+        let jid: Jid = chat.parse().map_err(|_| "bad chat id".to_string())?;
+        let (_, _, from_me) = self.key(chat, id)?;
+        if !from_me {
+            return Err("only your own messages can be deleted for everyone".into());
+        }
+        self.rt.block_on(client.revoke_message(jid, id.to_string(), whatsapp_rust::send::RevokeType::Sender)).map_err(|e| e.to_string())?;
+        self.db.write(|w| mark_deleted(w, chat, id));
+        self.changed(chat);
+        Ok(Value::Null)
+    }
+
+    /// Replaces the text of one of our messages (WhatsApp allows ~15 minutes).
+    fn edit(&self, chat: &str, id: &str, text: &str) -> Result<Value, String> {
+        let client = self.client()?;
+        let jid: Jid = chat.parse().map_err(|_| "bad chat id".to_string())?;
+        self.rt.block_on(client.edit_message(jid, id.to_string(), wa::Message::text(text.to_string()))).map_err(|e| e.to_string())?;
+        self.db.write(|w| w.exec("UPDATE messages SET text=?3, edited=1 WHERE chat=?1 AND id=?2", &[&chat, &id, &text]));
+        self.changed(chat);
+        Ok(Value::Null)
+    }
+
+    /// Fetches a message's media file, once, and returns where it is.
+    fn download(&self, chat: &str, id: &str) -> Result<String, String> {
+        let (raw, kind, file_name, path) = self
+            .db
+            .get("SELECT raw, type, file_name, media_path FROM messages WHERE chat=?1 AND id=?2", &[&chat, &id], |r| {
+                Ok((r.get::<_, Option<Vec<u8>>>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+            })
+            .ok_or("unknown message")?;
+        if !path.is_empty() && std::path::Path::new(&path).exists() {
+            return Ok(path);
+        }
+        let raw = raw.filter(|raw| !raw.is_empty()).ok_or("this message has no media")?;
+        let message = wa::Message::decode_from_slice(&raw).map_err(|e| e.to_string())?;
+        let base = message.get_base_message();
+        let client = self.client()?;
+        let mut ext = match kind.as_str() {
+            "image" => ".jpg",
+            "video" => ".mp4",
+            "audio" => ".ogg",
+            "sticker" => ".webp",
+            _ => "",
+        }
+        .to_string();
+        let data = if let Some(media) = base.image_message.as_option() {
+            if media.mimetype.as_deref().is_some_and(|m| m.contains("png")) {
+                ext = ".png".into();
+            }
+            self.rt.block_on(client.download(media))
+        } else if let Some(media) = base.video_message.as_option() {
+            self.rt.block_on(client.download(media))
+        } else if let Some(media) = base.audio_message.as_option() {
+            self.rt.block_on(client.download(media))
+        } else if let Some(media) = base.document_message.as_option() {
+            ext = std::path::Path::new(&file_name).extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+            self.rt.block_on(client.download(media))
+        } else if let Some(media) = base.sticker_message.as_option() {
+            self.rt.block_on(client.download(media))
+        } else {
+            return Err("this message has no media".into());
+        }
+        .map_err(|e| e.to_string())?;
+        let file = self.dir.join("media").join(format!("{}{ext}", safe_name(id)));
+        std::fs::write(&file, data).map_err(|e| e.to_string())?;
+        let file = file.to_string_lossy().into_owned();
+        self.db.write(|w| w.exec("UPDATE messages SET media_path=?3 WHERE chat=?1 AND id=?2", &[&chat, &id, &file]));
+        Ok(file)
+    }
+
+    /// The profile photo of a chat as a file, fetched once; empty when there
+    /// is none or it cannot be had right now.
+    fn avatar(&self, jid: &str) -> String {
+        let file = self.dir.join("avatars").join(format!("{}.jpg", safe_name(jid)));
+        if file.exists() {
+            return file.to_string_lossy().into_owned();
+        }
+        // Remembered as "has none", so the server is not asked on every redraw.
+        let none = file.with_extension("none");
+        if none.metadata().and_then(|m| m.modified()).is_ok_and(|at| at.elapsed().is_ok_and(|age| age.as_secs() < 86400)) {
+            return String::new();
+        }
+        let (Ok(client), Ok(parsed)) = (self.client(), jid.parse::<Jid>()) else { return String::new() };
+        let picture = self.rt.block_on(client.contacts().get_profile_picture(&parsed, true)).ok().flatten();
+        let bytes = picture.and_then(|picture| {
+            let mut body = ureq::get(&picture.url).call().ok()?.into_body();
+            body.read_to_vec().ok()
+        });
+        match bytes {
+            Some(bytes) if !bytes.is_empty() && std::fs::write(&file, &bytes).is_ok() => file.to_string_lossy().into_owned(),
+            _ => {
+                let _ = std::fs::write(&none, b"");
+                String::new()
+            }
+        }
+    }
+
+    /// Archives or pins a chat, on every device.
+    fn chat_action(&self, chat: &str, column: &'static str, on: bool) -> Result<Value, String> {
+        let client = self.client()?;
+        let jid: Jid = chat.parse().map_err(|_| "bad chat id".to_string())?;
+        let actions = client.chat_actions();
+        self.rt
+            .block_on(async {
+                match (column, on) {
+                    ("archived", true) => actions.archive_chat(&jid, None).await,
+                    ("archived", false) => actions.unarchive_chat(&jid, None).await,
+                    (_, true) => actions.pin_chat(&jid).await,
+                    (_, false) => actions.unpin_chat(&jid).await,
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        self.db.write(|w| {
+            w.exec(&format!("UPDATE chats SET {column}=?2 WHERE jid=?1"), &[&chat, &on]);
+            // An archived chat is not pinned, as on the phone.
+            if column == "archived" && on {
+                w.exec("UPDATE chats SET pinned=0 WHERE jid=?1", &[&chat]);
+            }
+        });
+        self.send(json!({"type": "chats"}));
+        Ok(Value::Null)
+    }
+
+    /// Mutes a chat for `seconds`, for good when negative, or not at all when zero.
+    fn mute(&self, chat: &str, seconds: i64) -> Result<Value, String> {
+        let client = self.client()?;
+        let jid: Jid = chat.parse().map_err(|_| "bad chat id".to_string())?;
+        let until = if seconds > 0 { now() + seconds } else { seconds.signum() };
+        let actions = client.chat_actions();
+        self.rt
+            .block_on(async {
+                match seconds {
+                    0 => actions.unmute_chat(&jid).await,
+                    s if s < 0 => actions.mute_chat(&jid).await,
+                    _ => actions.mute_chat_until(&jid, until * 1000).await,
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        self.db.write(|w| w.exec("UPDATE chats SET muted_until=?2 WHERE jid=?1", &[&chat, &until]));
+        self.send(json!({"type": "chats"}));
+        Ok(Value::Null)
+    }
+
+    fn star(&self, chat: &str, id: &str, on: bool) -> Result<Value, String> {
+        let client = self.client()?;
+        let jid: Jid = chat.parse().map_err(|_| "bad chat id".to_string())?;
+        let (key, _, from_me) = self.key(chat, id)?;
+        let participant = key.participant.as_deref().and_then(|p| p.parse::<Jid>().ok());
+        let actions = client.chat_actions();
+        self.rt
+            .block_on(async {
+                if on {
+                    actions.star_message(&jid, participant.as_ref(), id, from_me).await
+                } else {
+                    actions.unstar_message(&jid, participant.as_ref(), id, from_me).await
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        self.db.write(|w| w.exec("UPDATE messages SET starred=?3 WHERE chat=?1 AND id=?2", &[&chat, &id, &on]));
+        self.send(json!({"type": "messages", "chat": chat}));
+        Ok(Value::Null)
     }
 
     /// Marks a chat read here and tells the senders.
@@ -243,11 +477,104 @@ impl Account {
         });
     }
 
-    fn handle(&self, event: &Event) {
+    /// The chat or person behind a JID, by phone number where it is known.
+    /// WhatsApp addresses many people by a hidden id ("…@lid"); without this
+    /// one person would show up as two chats.
+    async fn pn(&self, jid: &Jid) -> String {
+        let plain = jid.to_non_ad();
+        if plain.is_lid() {
+            if let Ok(client) = self.client() {
+                if let Ok(Some(entry)) = client.get_lid_pn_entry(&plain).await {
+                    return format!("{}@s.whatsapp.net", entry.phone_number);
+                }
+            }
+        }
+        plain.to_string()
+    }
+
+    async fn pn_str(&self, jid: &str) -> String {
+        if !jid.ends_with("@lid") {
+            return jid.to_string();
+        }
+        match jid.parse::<Jid>() {
+            Ok(parsed) => self.pn(&parsed).await,
+            Err(_) => jid.to_string(),
+        }
+    }
+
+    /// Moves what was stored under hidden ids to the phone-number ids now
+    /// that the mapping is known, merging with what is already there.
+    async fn repair_hidden_ids(&self) {
+        let hidden = self.db.hidden_ids();
+        let mut known = Vec::new();
+        for lid in hidden {
+            let pn = self.pn_str(&lid).await;
+            if pn != lid {
+                known.push((lid, pn));
+            }
+        }
+        if known.is_empty() {
+            return;
+        }
+        self.db.write(|w| {
+            for (lid, pn) in &known {
+                w.exec("UPDATE OR IGNORE messages SET chat=?2 WHERE chat=?1", &[lid, pn]);
+                w.exec("DELETE FROM messages WHERE chat=?1", &[lid]);
+                w.exec("UPDATE messages SET sender=?2 WHERE sender=?1", &[lid, pn]);
+                w.exec("UPDATE OR IGNORE reactions SET chat=?2 WHERE chat=?1", &[lid, pn]);
+                w.exec("UPDATE OR IGNORE names SET jid=?2 WHERE jid=?1", &[lid, pn]);
+                w.exec("DELETE FROM names WHERE jid=?1", &[lid]);
+                w.exec(
+                    "INSERT INTO chats(jid,last_ts,unread,archived,pinned)
+                     SELECT ?2,last_ts,unread,archived,pinned FROM chats WHERE jid=?1
+                     ON CONFLICT(jid) DO UPDATE SET last_ts=MAX(last_ts, excluded.last_ts), unread=unread+excluded.unread",
+                    &[lid, pn],
+                );
+                w.exec("DELETE FROM chats WHERE jid=?1", &[lid]);
+            }
+        });
+        self.send(json!({"type": "chats"}));
+        self.send(json!({"type": "messages", "chat": ""}));
+    }
+
+    /// Messages that change another message instead of being one: a reaction,
+    /// a deletion, an edit. True if this was one of them.
+    fn apply_side_effect(&self, chat: &str, sender: &str, message: &wa::Message) -> bool {
+        let base = message.get_base_message();
+        if let Some(reaction) = base.reaction_message.as_option() {
+            if let Some(target) = reaction.key.as_option().and_then(|key| key.id.as_deref()) {
+                self.db.write(|w| set_reaction(w, chat, target, sender, reaction.text.as_deref().unwrap_or("")));
+                self.send(json!({"type": "messages", "chat": chat}));
+            }
+            return true;
+        }
+        if let Some(protocol) = base.protocol_message.as_option() {
+            use wa::message::protocol_message::Type;
+            let target = protocol.key.as_option().and_then(|key| key.id.clone()).unwrap_or_default();
+            match protocol.r#type {
+                Some(Type::Revoke) if !target.is_empty() => {
+                    self.db.write(|w| mark_deleted(w, chat, &target));
+                    self.changed(chat);
+                }
+                Some(Type::MessageEdit) if !target.is_empty() => {
+                    if let Some(text) = protocol.edited_message.as_option().and_then(|edited| edited.text_content()) {
+                        self.db.write(|w| w.exec("UPDATE messages SET text=?3, edited=1 WHERE chat=?1 AND id=?2", &[&chat, &target, &text]));
+                        self.changed(chat);
+                    }
+                }
+                _ => {}
+            }
+            return true;
+        }
+        false
+    }
+
+    async fn handle(&self, event: &Event) {
         match event {
             Event::Connected(_) => {
                 self.set_state("connected", "");
                 self.send(json!({"type": "chats"}));
+                self.repair_hidden_ids().await;
             }
             Event::PairSuccess(_) => self.set_state("connecting", ""),
             Event::LoggedOut(_) => self.set_state("logged_out", ""),
@@ -259,12 +586,32 @@ impl Account {
             Event::Messages(batch) => {
                 for inbound in batch.iter() {
                     let info = &inbound.info;
-                    let chat = info.source.chat.to_non_ad().to_string();
+                    let source = &info.source;
+                    let from_me = source.is_from_me;
+                    // A one-to-one chat addressed by hidden id carries the
+                    // phone-number id alongside; prefer it to a lookup.
+                    let chat = if source.chat.is_lid() {
+                        match if from_me { &source.recipient_alt } else { &source.sender_alt } {
+                            Some(alt) if !alt.is_lid() => alt.to_non_ad().to_string(),
+                            _ => self.pn(&source.chat).await,
+                        }
+                    } else {
+                        source.chat.to_non_ad().to_string()
+                    };
                     if chat.ends_with("@broadcast") || chat.ends_with("@newsletter") {
                         continue;
                     }
-                    let from_me = info.source.is_from_me;
-                    let sender = if from_me { String::new() } else { info.source.sender.to_non_ad().to_string() };
+                    let sender = if from_me {
+                        String::new()
+                    } else {
+                        match &source.sender_alt {
+                            Some(alt) if source.sender.is_lid() && !alt.is_lid() => alt.to_non_ad().to_string(),
+                            _ => self.pn(&source.sender).await,
+                        }
+                    };
+                    if self.apply_side_effect(&chat, &sender, &inbound.message) {
+                        continue;
+                    }
                     let Some(mut message) = row(&chat, info.id.as_ref(), &sender, from_me, info.timestamp.timestamp(), &inbound.message) else {
                         continue;
                     };
@@ -300,7 +647,7 @@ impl Account {
             }
             Event::Receipt(receipt) => {
                 use whatsapp_rust::wacore::types::presence::ReceiptType;
-                let chat = receipt.source.chat.to_non_ad().to_string();
+                let chat = self.pn(&receipt.source.chat).await;
                 let to = match receipt.r#type {
                     ReceiptType::Read => status::READ,
                     // "Played" is sent whatever the other side's read-receipt setting, and is not a blue tick.
@@ -323,6 +670,27 @@ impl Account {
             }
             Event::HistorySync(lazy) => {
                 let Some(history) = lazy.get() else { return };
+                // Hidden ids are resolved first: the database is written without awaiting.
+                let mut resolved: std::collections::HashMap<String, String> = Default::default();
+                for conversation in &history.conversations {
+                    let mut ids = vec![conversation.id.clone()];
+                    for entry in &conversation.messages {
+                        if let Some(web) = entry.message.as_option() {
+                            ids.extend(web.key.as_option().and_then(|k| k.participant.clone()));
+                            ids.extend(web.participant.clone());
+                        }
+                    }
+                    for id in ids {
+                        if id.ends_with("@lid") && !resolved.contains_key(&id) {
+                            let pn = match (&conversation.pn_jid, id == conversation.id) {
+                                (Some(pn), true) if !pn.is_empty() => pn.split(':').next().unwrap_or(pn).to_string() + if pn.contains('@') { "" } else { "@s.whatsapp.net" },
+                                _ => self.pn_str(&id).await,
+                            };
+                            resolved.insert(id, pn);
+                        }
+                    }
+                }
+                let plain = |id: &str| resolved.get(id).cloned().unwrap_or_else(|| id.to_string());
                 // Only the first sync after linking describes a chat's settings.
                 let bootstrap = lazy.sync_type() == wa::history_sync::HistorySyncType::InitialBootstrap as i32;
                 self.db.write(|w| {
@@ -332,7 +700,8 @@ impl Account {
                         }
                     }
                     for conversation in &history.conversations {
-                        let chat = conversation.id.as_str();
+                        let chat = plain(&conversation.id);
+                        let chat = chat.as_str();
                         if chat.is_empty() || chat.ends_with("@broadcast") || chat.ends_with("@newsletter") {
                             continue;
                         }
@@ -357,7 +726,7 @@ impl Account {
                             let sender = if from_me {
                                 String::new()
                             } else {
-                                key.participant.clone().or_else(|| web.participant.clone()).unwrap_or_else(|| chat.to_string())
+                                key.participant.as_deref().or(web.participant.as_deref()).map(plain).unwrap_or_else(|| chat.to_string())
                             };
                             let Some(mut message) = row(chat, key.id.as_deref().unwrap_or(""), &sender, from_me, web.message_timestamp.unwrap_or(0) as i64, body) else {
                                 continue;
@@ -398,26 +767,32 @@ fn row(chat: &str, id: &str, sender: &str, from_me: bool, ts: i64, message: &wa:
     }
     let base = message.get_base_message();
     let mut out = NewMessage { chat: chat.to_string(), id: id.to_string(), sender: sender.to_string(), from_me, ts, ..Default::default() };
+    let mut context = None;
     if let Some(text) = base.text_content() {
         out.kind = "text".into();
         out.text = text.to_string();
+        context = base.extended_text_message.as_option().and_then(|m| m.context_info.as_option());
     } else if let Some(image) = base.image_message.as_option() {
+        context = image.context_info.as_option();
         out.kind = "image".into();
         out.text = image.caption.clone().unwrap_or_default();
         out.w = image.width.unwrap_or(0) as i64;
         out.h = image.height.unwrap_or(0) as i64;
         out.thumb = image.jpeg_thumbnail.as_ref().map(|t| t.to_vec());
     } else if let Some(video) = base.video_message.as_option() {
+        context = video.context_info.as_option();
         out.kind = "video".into();
         out.text = video.caption.clone().unwrap_or_default();
         out.w = video.width.unwrap_or(0) as i64;
         out.h = video.height.unwrap_or(0) as i64;
         out.thumb = video.jpeg_thumbnail.as_ref().map(|t| t.to_vec());
     } else if let Some(audio) = base.audio_message.as_option() {
+        context = audio.context_info.as_option();
         out.kind = "audio".into();
         // The UI reads a voice message's length from `w`.
         out.w = audio.seconds.unwrap_or(0) as i64;
     } else if let Some(document) = base.document_message.as_option() {
+        context = document.context_info.as_option();
         out.kind = "document".into();
         out.text = document.caption.clone().unwrap_or_default();
         out.file_name = document.file_name.clone().or_else(|| document.title.clone()).unwrap_or_default();
@@ -426,7 +801,44 @@ fn row(chat: &str, id: &str, sender: &str, from_me: bool, ts: i64, message: &wa:
     } else {
         return None;
     }
+    // The message a reply quotes.
+    if let Some(context) = context {
+        if let Some(quoted) = context.stanza_id.as_deref().filter(|id| !id.is_empty()) {
+            out.quoted_id = quoted.to_string();
+            out.quoted_sender = context.participant.clone().unwrap_or_default().split(':').next().unwrap_or("").to_string();
+            if let Some(original) = context.quoted_message.as_option() {
+                out.quoted_text = row(chat, "quoted", "", false, 0, original)
+                    .map(|q| if q.kind == "text" { q.text } else if q.text.is_empty() { q.kind } else { q.text })
+                    .unwrap_or_default();
+            }
+        }
+    }
+    // Media keeps its protocol message: it holds the keys to download with.
+    if out.kind != "text" {
+        out.raw = Some(message.encode_to_vec());
+    }
     Some(out)
+}
+
+/// Sets `sender`'s reaction on a message ("" is us); an empty emoji removes it.
+fn set_reaction(w: &crate::db::Writer, chat: &str, id: &str, sender: &str, emoji: &str) {
+    if emoji.is_empty() {
+        w.exec("DELETE FROM reactions WHERE chat=?1 AND msg_id=?2 AND sender=?3", &[&chat, &id, &sender]);
+    } else {
+        w.exec(
+            "INSERT INTO reactions(chat,msg_id,sender,emoji) VALUES(?1,?2,?3,?4) ON CONFLICT(chat,msg_id,sender) DO UPDATE SET emoji=excluded.emoji",
+            &[&chat, &id, &sender, &emoji],
+        );
+    }
+}
+
+fn mark_deleted(w: &crate::db::Writer, chat: &str, id: &str) {
+    w.exec("UPDATE messages SET deleted=1, text='', thumb=NULL, raw=NULL, media_path='' WHERE chat=?1 AND id=?2", &[&chat, &id]);
+}
+
+/// A string safe to use as a file name.
+fn safe_name(text: &str) -> String {
+    text.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' }).collect()
 }
 
 fn now() -> i64 {
