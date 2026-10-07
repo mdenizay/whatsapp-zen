@@ -94,7 +94,7 @@ fn offline() -> bool {
 impl Ui {
     pub fn build(app: &adw::Application, events: async_channel::Receiver<Value>) -> Rc<Ui> {
         // Pairing.
-        let pair_picture = gtk::Picture::builder().width_request(264).height_request(264).can_shrink(false).build();
+        let pair_picture = gtk::Picture::builder().width_request(264).height_request(264).can_shrink(false).halign(gtk::Align::Center).build();
         pair_picture.add_css_class("card");
         let pair_note = gtk::Label::builder().wrap(true).justify(gtk::Justification::Center).max_width_chars(46).build();
         let pair_box = gtk::Box::new(gtk::Orientation::Vertical, 18);
@@ -1198,7 +1198,8 @@ fn qr_texture(code: &str) -> Option<gdk::Texture> {
     }
     let qr = qrcode::QrCode::with_error_correction_level(code.as_bytes(), qrcode::EcLevel::L).ok()?;
     let (modules, colors) = (qr.width(), qr.to_colors());
-    let (scale, border) = (8usize, 4usize);
+    // The picture shows at its own size, about 300 points.
+    let (scale, border) = (4usize, 4usize);
     let size = (modules + border * 2) * scale;
     let mut pixels = vec![255u8; size * size * 4];
     for (index, color) in colors.iter().enumerate() {
