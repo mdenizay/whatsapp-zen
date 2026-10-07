@@ -5,9 +5,20 @@ import UniformTypeIdentifiers
 /// Image loading and conversion. Everything is decoded at display size, never
 /// at full resolution, which is most of what keeps memory low.
 enum Images {
+    /// Pictures in messages. Each one costs about twice its size once it has
+    /// been on screen (the window server keeps its own copy), so the limit is
+    /// modest, and the cache is emptied when the chat is left.
     private static let cache: NSCache<NSString, NSImage> = {
         let c = NSCache<NSString, NSImage>()
-        c.totalCostLimit = 12 << 20
+        c.totalCostLimit = 8 << 20
+        return c
+    }()
+
+    /// Profile photos: small, and wanted again in every list, so they are kept
+    /// apart from the pictures of whichever chat is open.
+    private static let avatars: NSCache<NSString, NSImage> = {
+        let c = NSCache<NSString, NSImage>()
+        c.totalCostLimit = 4 << 20
         return c
     }()
 
@@ -27,7 +38,8 @@ enum Images {
     }
 
     /// Loads a file downsampled to at most `maxPixel` on its long edge.
-    static func load(path: String, maxPixel: CGFloat) async -> NSImage? {
+    static func load(path: String, maxPixel: CGFloat, avatar: Bool = false) async -> NSImage? {
+        let cache = avatar ? avatars : cache
         let key = "\(path)#\(Int(maxPixel))" as NSString
         if let hit = cache.object(forKey: key) { return hit }
         return await withCheckedContinuation { cont in
@@ -62,7 +74,14 @@ enum Images {
     /// Drops every decoded image and hands freed memory back to the system.
     static func trim() {
         cache.removeAllObjects()
+        avatars.removeAllObjects()
         malloc_zone_pressure_relief(nil, 0)
+    }
+
+    /// Lets go of the pictures of the chat that was just left. Those still on
+    /// screen stay until their rows go away.
+    static func dropMedia() {
+        cache.removeAllObjects()
     }
 
     /// An already decoded image, if it is still in memory. Lets a view that is
@@ -98,14 +117,14 @@ enum Images {
         }
         let file = path
         guard !file.isEmpty else { return nil }
-        let img = await load(path: file, maxPixel: size * 2)
+        let img = await load(path: file, maxPixel: size * 2, avatar: true)
         await MainActor.run { avatarKeys[jid] = "\(file)#\(Int(size * 2))" as NSString }
         return img
     }
 
     @MainActor
     static func forgetAvatar(_ jid: String) {
-        if let key = avatarKeys.removeValue(forKey: jid) { cache.removeObject(forKey: key) }
+        if let key = avatarKeys.removeValue(forKey: jid) { avatars.removeObject(forKey: key) }
         avatarPaths = avatarPaths.filter { !$0.key.hasSuffix("/\(jid)") }
     }
 

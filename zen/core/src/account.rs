@@ -617,6 +617,7 @@ impl Account {
                 w.exec("UPDATE OR IGNORE messages SET chat=?2 WHERE chat=?1", &[lid, pn]);
                 w.exec("DELETE FROM messages WHERE chat=?1", &[lid]);
                 w.exec("UPDATE messages SET sender=?2 WHERE sender=?1", &[lid, pn]);
+                w.exec("UPDATE messages SET quoted_sender=?2 WHERE quoted_sender=?1", &[lid, pn]);
                 w.exec("UPDATE OR IGNORE reactions SET chat=?2 WHERE chat=?1", &[lid, pn]);
                 w.exec("UPDATE OR IGNORE names SET jid=?2 WHERE jid=?1", &[lid, pn]);
                 w.exec("DELETE FROM names WHERE jid=?1", &[lid]);
@@ -732,6 +733,10 @@ impl Account {
                     let Some(mut message) = row(&chat, info.id.as_ref(), &sender, from_me, info.timestamp.timestamp(), &inbound.message) else {
                         continue;
                     };
+                    // The person quoted may be named by a hidden id as well.
+                    if message.quoted_sender.ends_with("@lid") {
+                        message.quoted_sender = self.pn_str(&message.quoted_sender).await;
+                    }
                     message.status = if from_me { status::SENT } else { 0 };
                     message.unread = !from_me;
                     self.name_mentions(&mut message).await;
@@ -818,6 +823,8 @@ impl Account {
                 let plain = |id: &str| resolved.get(id).cloned().unwrap_or_else(|| id.to_string());
                 // Only the first sync after linking describes a chat's settings.
                 let bootstrap = lazy.sync_type() == wa::history_sync::HistorySyncType::InitialBootstrap as i32;
+                // Someone quoted under a hidden id: put right after the write.
+                let mut hidden_quote = false;
                 self.db.write(|w| {
                     for name in &history.pushnames {
                         if let (Some(id), Some(name)) = (&name.id, &name.pushname) {
@@ -859,6 +866,7 @@ impl Account {
                             let Some(mut message) = row(chat, key.id.as_deref().unwrap_or(""), &sender, from_me, web.message_timestamp.unwrap_or(0) as i64, body) else {
                                 continue;
                             };
+                            hidden_quote |= message.quoted_sender.ends_with("@lid");
                             if from_me {
                                 // WebMessageInfo status: 1 pending, 2 server ack, 3 delivered, 4 read, 5 played
                                 message.status = (web.status.map(|s| s as i32).unwrap_or(2) - 1).clamp(status::SENT, status::READ);
@@ -879,6 +887,9 @@ impl Account {
                         }
                     }
                 });
+                if hidden_quote {
+                    self.repair_hidden_ids().await;
+                }
                 self.send(json!({"type": "chats"}));
                 self.send(json!({"type": "messages", "chat": ""}));
             }

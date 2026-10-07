@@ -353,6 +353,7 @@ final class AppStore: ObservableObject, Identifiable {
         clearDraftState()
         unreadFrom = nil
         // Leaving a chat frees what it had decoded.
+        Images.dropMedia()
         malloc_zone_pressure_relief(nil, 0)
         guard let jid else { return }
         unreadAtOpen = chats.first { $0.jid == jid }?.unread ?? 0

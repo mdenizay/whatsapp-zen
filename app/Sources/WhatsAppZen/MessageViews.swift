@@ -206,6 +206,7 @@ struct MessageRow: View {
                     .buttonStyle(.borderless)
                     .padding(12)
                 }
+                .layoutValue(key: SetsBubbleWidth.self, value: message.type == "image")
                 .overlay(alignment: .bottomTrailing) {
                     if bare {
                         meta.foregroundStyle(.white)
@@ -727,14 +728,30 @@ extension View {
     }
 }
 
+/// Marks the child of a bubble that decides how wide the bubble is.
+struct SetsBubbleWidth: LayoutValueKey {
+    static let defaultValue = false
+}
+
 /// A vertical stack that is only as wide as its widest child wants to be, and
 /// then gives every child that width. A plain VStack would let one greedy
 /// child (a quote, a right-aligned timestamp) stretch the bubble to the limit.
 struct BubbleStack: Layout {
     var spacing: CGFloat = 5
 
+    /// A caption under a picture should not make the bubble wider than the
+    /// picture.
+    static let minimumUnderPicture: CGFloat = 220
+
     private func width(_ proposal: ProposedViewSize, _ subviews: Subviews) -> CGFloat {
-        let ideal = subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
+        let widths = subviews.map { $0.sizeThatFits(.unspecified).width }
+        var ideal = widths.max() ?? 0
+        // With a picture in the bubble the picture sets the width, and the
+        // text under it wraps instead of stretching the bubble past it.
+        let pictures = zip(subviews, widths).filter { $0.0[SetsBubbleWidth.self] }.map(\.1)
+        if let picture = pictures.max() {
+            ideal = min(ideal, max(picture, Self.minimumUnderPicture))
+        }
         return min(ideal, proposal.width ?? ideal)
     }
 

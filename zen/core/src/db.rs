@@ -411,6 +411,7 @@ impl Db {
             "SELECT jid FROM chats WHERE jid LIKE '%@lid'
              UNION SELECT DISTINCT chat FROM messages WHERE chat LIKE '%@lid'
              UNION SELECT DISTINCT sender FROM messages WHERE sender LIKE '%@lid'
+             UNION SELECT DISTINCT quoted_sender FROM messages WHERE quoted_sender LIKE '%@lid'
              UNION SELECT jid FROM names WHERE jid LIKE '%@lid'",
         ) else {
             return Vec::new();

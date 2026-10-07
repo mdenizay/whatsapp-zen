@@ -2,6 +2,12 @@
 
 The section for the running version is shown in the app after an update.
 
+## 1.0.3
+
+- Memory: the pictures of a chat are let go when you leave it, so memory no longer climbs as you move between chats (about 30 MB less after browsing 25 chats)
+- A photo's caption wraps under the photo instead of stretching the bubble past it
+- Quoted messages show the person's name rather than an internal id
+
 ## 1.0.2
 
 - Calls: the other side's voice is now played when their phone sends it as Opus, as happens in video calls
