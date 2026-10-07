@@ -93,6 +93,7 @@ pub unsafe extern "C" fn WAStart(data_dir: *const c_char, callback: Callback) {
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).thread_name("zen-core").enable_all().build().expect("runtime");
     let core = Core { base, rt, emit, accounts: Mutex::new(HashMap::new()) };
     let _ = std::fs::create_dir_all(core.accounts_dir());
+    crate::logfile::start(&core.accounts_dir());
     let _ = CORE.set(core);
 }
 

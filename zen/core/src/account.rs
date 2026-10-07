@@ -715,7 +715,7 @@ impl Account {
                     if self.apply_side_effect(&chat, &sender, &inbound.message) {
                         continue;
                     }
-                    if self.apply_poll_vote(&chat, &sender, from_me, &inbound.message).await {
+                    if self.apply_poll_vote(&chat, &sender, from_me, &source.sender, &inbound.message).await {
                         continue;
                     }
                     let Some(mut message) = row(&chat, info.id.as_ref(), &sender, from_me, info.timestamp.timestamp(), &inbound.message) else {

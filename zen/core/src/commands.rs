@@ -762,6 +762,31 @@ impl Account {
         Some((options, secret, if from_me { self.me() } else { sender }))
     }
 
+    /// The id a poll's maker has in the poll's own chat. Votes are encrypted
+    /// against it, and a group addressed by hidden ids uses those, not the
+    /// phone-number ids everything is stored under here.
+    async fn poll_creator(&self, chat: &str, creator: &str) -> Result<Jid, String> {
+        use whatsapp_rust::wacore::types::message::AddressingMode;
+        let client = self.client()?;
+        let plain = jid(creator)?;
+        if !chat.ends_with("@g.us") {
+            return Ok(plain);
+        }
+        let hidden = client.groups().get_metadata(&jid(chat)?).await.map(|group| group.addressing_mode == AddressingMode::Lid).unwrap_or(false);
+        if !hidden || plain.is_lid() {
+            return Ok(plain);
+        }
+        if creator == self.me() {
+            if let Some(own) = client.lid() {
+                return Ok(own.to_non_ad());
+            }
+        }
+        Ok(match client.get_lid_pn_entry(&plain).await {
+            Ok(Some(entry)) => Jid::lid(entry.lid.as_ref()),
+            _ => plain,
+        })
+    }
+
     fn save_vote(&self, chat: &str, id: &str, voter: &str, options: &[String]) {
         let chosen = serde_json::to_string(options).unwrap_or_else(|_| "[]".into());
         self.db.write(|w| {
@@ -780,21 +805,23 @@ impl Account {
         if secret.is_empty() {
             return Err("This poll's key was not received, so it cannot be voted on here".into());
         }
-        self.rt.block_on(client.polls().vote(jid(chat)?, id, &jid(&creator)?, &secret, options)).map_err(|e| e.to_string())?;
+        let creator = self.rt.block_on(self.poll_creator(chat, &creator))?;
+        self.rt.block_on(client.polls().vote(jid(chat)?, id, &creator, &secret, options)).map_err(|e| e.to_string())?;
         self.save_vote(chat, id, "", options);
         Ok(Value::Null)
     }
 
     /// Decrypts someone's vote; it names its choices by SHA-256 hash. True if
     /// the message was a vote.
-    pub(crate) async fn apply_poll_vote(&self, chat: &str, sender: &str, from_me: bool, message: &wa::Message) -> bool {
+    pub(crate) async fn apply_poll_vote(&self, chat: &str, sender: &str, from_me: bool, voter_as_sent: &Jid, message: &wa::Message) -> bool {
         use sha2::Digest as _;
         let base = message.get_base_message();
         let Some(update) = base.poll_update_message.as_option() else { return false };
         let (Some(id), Some(vote)) = (update.poll_creation_message_key.as_option().and_then(|k| k.id.clone()), update.vote.as_option()) else { return true };
         let (Some((options, secret, creator)), Ok(client)) = (self.poll(chat, &id), self.client()) else { return true };
-        let voter = if from_me { self.me() } else { sender.to_string() };
-        let (Ok(creator), Ok(voter_jid)) = (creator.parse::<Jid>(), voter.parse::<Jid>()) else { return true };
+        // Both ids as the chat addresses them, which is what the vote was encrypted against.
+        let Ok(creator) = self.poll_creator(chat, &creator).await else { return true };
+        let voter_jid = voter_as_sent.to_non_ad();
         let ciphertext = whatsapp_rust::wacore::poll::PollVoteCiphertext {
             enc_payload: vote.enc_payload.as_deref().unwrap_or(&[]),
             enc_iv: vote.enc_iv.as_deref().unwrap_or(&[]),

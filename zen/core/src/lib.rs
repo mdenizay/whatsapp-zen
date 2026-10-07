@@ -6,5 +6,6 @@ mod commands;
 pub mod db;
 pub mod ffi;
 pub mod i18n;
+mod logfile;
 mod media;
 pub mod ogg;
