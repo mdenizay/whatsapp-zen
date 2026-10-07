@@ -2,6 +2,10 @@
 
 The section for the running version is shown in the app after an update.
 
+## 1.0.4
+
+- Mentions show the person's name again where they showed a long number: in groups that hide phone numbers, in quoted messages and in messages that came with the history
+
 ## 1.0.3
 
 - Memory: the pictures of a chat are let go when you leave it, so memory no longer climbs as you move between chats (about 30 MB less after browsing 25 chats)

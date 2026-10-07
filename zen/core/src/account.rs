@@ -584,6 +584,9 @@ impl Account {
                     return format!("{}@s.whatsapp.net", entry.phone_number);
                 }
             }
+            if let Some(known) = self.db.pn_of(&plain.to_string()) {
+                return known;
+            }
         }
         plain.to_string()
     }
@@ -600,7 +603,7 @@ impl Account {
 
     /// Moves what was stored under hidden ids to the phone-number ids now
     /// that the mapping is known, merging with what is already there.
-    async fn repair_hidden_ids(&self) {
+    pub(crate) async fn repair_hidden_ids(&self) {
         let hidden = self.db.hidden_ids();
         let mut known = Vec::new();
         for lid in hidden {
@@ -890,6 +893,8 @@ impl Account {
                 if hidden_quote {
                     self.repair_hidden_ids().await;
                 }
+                // History arrives with its mentions as numbers.
+                self.repair_mentions().await;
                 self.send(json!({"type": "chats"}));
                 self.send(json!({"type": "messages", "chat": ""}));
             }

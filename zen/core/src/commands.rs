@@ -531,6 +531,7 @@ impl Account {
         let me = self.me();
         let mut members = Vec::new();
         let mut i_am_admin = false;
+        self.learn_hidden_ids(info.participants.iter().map(|p| (&p.jid, p.phone_number.as_ref())));
         for participant in &info.participants {
             let id = match &participant.phone_number {
                 Some(pn) => pn.to_non_ad().to_string(),
@@ -669,6 +670,9 @@ impl Account {
     pub(crate) async fn refresh_groups(&self) {
         let Ok(client) = self.client() else { return };
         let Ok(groups) = client.groups().get_participating().await else { return };
+        for group in groups.values() {
+            self.learn_hidden_ids(group.participants.iter().map(|p| (&p.jid, p.phone_number.as_ref())));
+        }
         self.db.write(|w| {
             for (id, group) in &groups {
                 let chat = id.to_non_ad().to_string();
@@ -679,6 +683,73 @@ impl Account {
             }
         });
         self.send(json!({"type": "chats"}));
+        // The member lists may have named people known only by a hidden id.
+        self.repair_hidden_ids().await;
+        self.repair_mentions().await;
+    }
+
+    /// Remembers which phone-number id is behind each hidden id of a member list.
+    fn learn_hidden_ids<'a>(&self, members: impl Iterator<Item = (&'a Jid, Option<&'a Jid>)>) {
+        let pairs: Vec<(String, String)> = members
+            .filter(|(jid, _)| jid.is_lid())
+            .filter_map(|(jid, pn)| Some((jid.to_non_ad().to_string(), pn?.to_non_ad().to_string())))
+            .collect();
+        if pairs.is_empty() {
+            return;
+        }
+        self.db.write(|w| {
+            for (lid, pn) in &pairs {
+                w.exec("INSERT INTO lids(lid,pn) VALUES(?1,?2) ON CONFLICT(lid) DO UPDATE SET pn=excluded.pn", &[lid, pn]);
+            }
+        });
+    }
+
+    /// Puts names where stored messages still mention someone by number:
+    /// messages that came with the history, texts quoted in a reply, and
+    /// mentions of people who were known only by a hidden id at the time.
+    pub(crate) async fn repair_mentions(&self) {
+        let rows = self.db.unnamed_mentions();
+        if rows.is_empty() {
+            return;
+        }
+        let me = self.me();
+        // What to write for each number; None where nothing better is known.
+        let mut names: std::collections::HashMap<String, Option<(String, bool)>> = std::collections::HashMap::new();
+        let mut changes = Vec::new();
+        for (chat, id, from_me, text, quoted) in rows {
+            let mut mentions_me = false;
+            let mut fixed = [text.clone(), quoted.clone()];
+            for body in &mut fixed {
+                for number in mention_numbers(body) {
+                    if !names.contains_key(&number) {
+                        let hidden = format!("{number}@lid");
+                        let found = self.pn_str(&hidden).await;
+                        let (who, was_hidden) = if found != hidden { (found, true) } else { (format!("{number}@s.whatsapp.net"), false) };
+                        let name = if who == me { crate::i18n::t("You") } else { self.db.name_of(&who) };
+                        // A bare number is news only when it replaces a hidden id.
+                        let known = !name.starts_with('+') || was_hidden;
+                        names.insert(number.clone(), known.then(|| (name, who == me)));
+                    }
+                    if let Some(Some((name, is_me))) = names.get(&number) {
+                        mentions_me |= *is_me;
+                        *body = body.replace(&format!("@{number}"), &format!("@{name}"));
+                    }
+                }
+            }
+            if fixed[0] != text || fixed[1] != quoted {
+                let [text, quoted] = fixed;
+                changes.push((chat, id, text, quoted, mentions_me && !from_me));
+            }
+        }
+        if changes.is_empty() {
+            return;
+        }
+        self.db.write(|w| {
+            for (chat, id, text, quoted, mentions_me) in &changes {
+                w.exec("UPDATE messages SET text=?3, quoted_text=?4, mentions_me=MAX(mentions_me, ?5) WHERE chat=?1 AND id=?2", &[chat, id, text, quoted, mentions_me]);
+            }
+        });
+        self.send(json!({"type": "messages", "chat": ""}));
     }
 
     /// Whether the user's own read receipts are off. WhatsApp then shows them
@@ -1064,4 +1135,32 @@ fn dir_size(dir: &std::path::Path) -> u64 {
     std::fs::read_dir(dir)
         .map(|entries| entries.flatten().filter_map(|e| e.metadata().ok()).filter(|m| m.is_file()).map(|m| m.len()).sum())
         .unwrap_or(0)
+}
+
+/// The numbers of the "@1234567890" tokens in a text, longest first so that
+/// one number that begins another is not replaced inside it.
+fn mention_numbers(text: &str) -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    let mut rest = text;
+    while let Some(at) = rest.find('@') {
+        rest = &rest[at + 1..];
+        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        if digits.len() >= 8 && !found.contains(&digits) {
+            found.push(digits);
+        }
+    }
+    found.sort_by_key(|number| std::cmp::Reverse(number.len()));
+    found
+}
+
+#[cfg(test)]
+mod mention_tests {
+    use super::mention_numbers;
+
+    #[test]
+    fn finds_numbers_after_an_at_sign() {
+        assert_eq!(mention_numbers("hi @905551234567, and @273087090192510!"), ["273087090192510", "905551234567"]);
+        assert_eq!(mention_numbers("mail me@example.com or @123"), Vec::<String>::new());
+        assert_eq!(mention_numbers("@12345678 @12345678 @123456789"), ["123456789", "12345678"]);
+    }
 }

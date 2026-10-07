@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS reactions(
 );
 CREATE TABLE IF NOT EXISTS names(jid TEXT PRIMARY KEY, name TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS contacts(jid TEXT PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS lids(lid TEXT PRIMARY KEY, pn TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS poll_votes(chat TEXT NOT NULL, msg_id TEXT NOT NULL, voter TEXT NOT NULL,
     options TEXT NOT NULL, PRIMARY KEY(chat, msg_id, voter));
 ";
@@ -405,6 +406,26 @@ impl Db {
     }
 
     /// Every hidden id ("…@lid") the database still refers to.
+    /// The phone-number id behind a hidden id, as learnt from group member
+    /// lists. The protocol library keeps a table of its own, which knows
+    /// only the people it has exchanged messages with.
+    pub fn pn_of(&self, lid: &str) -> Option<String> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row("SELECT pn FROM lids WHERE lid=?1", [lid], |r| r.get(0)).optional().ok().flatten()
+    }
+
+    /// Messages whose text, or the text they quote, still names someone by
+    /// number ("@905551234567"): chat, id, sent by the user, text, quoted text.
+    pub fn unnamed_mentions(&self) -> Vec<(String, String, bool, String, String)> {
+        const TOKEN: &str = "*@[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]*";
+        let conn = self.conn.lock().unwrap();
+        let Ok(mut stmt) = conn.prepare("SELECT chat,id,from_me,text,quoted_text FROM messages WHERE text GLOB ?1 OR quoted_text GLOB ?1") else {
+            return Vec::new();
+        };
+        let rows = stmt.query_map([TOKEN], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)));
+        rows.map(|rows| rows.flatten().collect()).unwrap_or_default()
+    }
+
     pub fn hidden_ids(&self) -> Vec<String> {
         let conn = self.conn.lock().unwrap();
         let Ok(mut stmt) = conn.prepare(
