@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- WhatsApp Zen for Windows: a WinUI 3 window over the Rust core
-       (zen_core.dll, built from ../core with `cargo rustc -p zen-core
-       --release --crate-type cdylib`). Unpackaged and self-contained, so the
+       (zen_core.dll, built from ../core as a cdylib; see
+       .github/workflows/windows.yml). Unpackaged and self-contained, so the
        published folder runs as it is. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
