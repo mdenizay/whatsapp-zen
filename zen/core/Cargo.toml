@@ -4,8 +4,16 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+# A static library for the native apps (they link it and call the C functions
+# in src/ffi.rs), and a Rust library for tests and tools.
+crate-type = ["staticlib", "rlib"]
+
 [dependencies]
+base64 = "0.22"
 log = "0.4.34"
 rusqlite = "0.39"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 whatsapp-rust = { version = "0.7.0", default-features = false, features = ["sqlite-storage", "tokio-transport", "tokio-runtime", "tokio-native", "ureq-client"] }

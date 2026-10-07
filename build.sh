@@ -4,9 +4,18 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 APP="$ROOT/dist/WhatsApp Zen.app"
 
-echo "==> core (Go)"
-(cd "$ROOT/core" && CGO_ENABLED=1 MACOSX_DEPLOYMENT_TARGET=14.0 CGO_CFLAGS="-O2 -w" \
-    go build -buildmode=c-archive -trimpath -ldflags="-s -w" -o build/libwacore.a .)
+# CORE=rust links the Rust core (zen/core) instead of the Go one. Both are a
+# static library with the same three C functions, so the app is the same.
+if [ "${CORE:-go}" = "rust" ]; then
+    echo "==> core (Rust)"
+    (cd "$ROOT/zen" && MACOSX_DEPLOYMENT_TARGET=14.0 cargo build --release -p zen-core)
+    mkdir -p "$ROOT/core/build"
+    cp "$ROOT/zen/target/release/libzen_core.a" "$ROOT/core/build/libwacore.a"
+else
+    echo "==> core (Go)"
+    (cd "$ROOT/core" && CGO_ENABLED=1 MACOSX_DEPLOYMENT_TARGET=14.0 CGO_CFLAGS="-O2 -w" \
+        go build -buildmode=c-archive -trimpath -ldflags="-s -w" -o build/libwacore.a .)
+fi
 
 echo "==> app (Swift)"
 # Use Xcode when it is installed, even if xcode-select still points at the

@@ -1,15 +1,20 @@
 //! The app's own database: chats and messages as the UI shows them. The
-//! protocol library keeps its keys and sessions in a database of its own.
+//! schema is the one the Go core wrote, so a database made by either opens
+//! in the other. The protocol library keeps its keys in a database of its own.
 
 use std::path::Path;
 use std::sync::Mutex;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use base64::Engine as _;
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row};
+use serde::Serialize;
 
-use crate::model::{Chat, Message};
-
-pub struct Db {
-    conn: Mutex<Connection>,
+pub mod status {
+    pub const FAILED: i32 = -1;
+    pub const PENDING: i32 = 0;
+    pub const SENT: i32 = 1;
+    pub const DELIVERED: i32 = 2;
+    pub const READ: i32 = 3;
 }
 
 const SCHEMA: &str = "
@@ -18,23 +23,148 @@ CREATE TABLE IF NOT EXISTS chats(
     name TEXT NOT NULL DEFAULT '',
     last_ts INTEGER NOT NULL DEFAULT 0,
     unread INTEGER NOT NULL DEFAULT 0,
-    archived INTEGER NOT NULL DEFAULT 0,
-    pinned INTEGER NOT NULL DEFAULT 0
+    archived INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS messages(
     chat TEXT NOT NULL,
     id TEXT NOT NULL,
-    sender TEXT NOT NULL DEFAULT '',
-    from_me INTEGER NOT NULL DEFAULT 0,
-    ts INTEGER NOT NULL DEFAULT 0,
-    kind TEXT NOT NULL DEFAULT 'text',
+    sender TEXT NOT NULL,
+    from_me INTEGER NOT NULL,
+    ts INTEGER NOT NULL,
+    type TEXT NOT NULL,
     text TEXT NOT NULL DEFAULT '',
+    thumb BLOB,
+    raw BLOB,
+    media_path TEXT NOT NULL DEFAULT '',
+    file_name TEXT NOT NULL DEFAULT '',
+    w INTEGER NOT NULL DEFAULT 0,
+    h INTEGER NOT NULL DEFAULT 0,
+    quoted_id TEXT NOT NULL DEFAULT '',
+    quoted_text TEXT NOT NULL DEFAULT '',
+    quoted_sender TEXT NOT NULL DEFAULT '',
     status INTEGER NOT NULL DEFAULT 0,
+    unread INTEGER NOT NULL DEFAULT 0,
+    edited INTEGER NOT NULL DEFAULT 0,
+    deleted INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY(chat, id)
 );
-CREATE INDEX IF NOT EXISTS messages_by_time ON messages(chat, ts DESC, id DESC);
+CREATE INDEX IF NOT EXISTS messages_chat_ts ON messages(chat, ts);
+CREATE TABLE IF NOT EXISTS reactions(
+    chat TEXT NOT NULL,
+    msg_id TEXT NOT NULL,
+    sender TEXT NOT NULL,
+    emoji TEXT NOT NULL,
+    PRIMARY KEY(chat, msg_id, sender)
+);
 CREATE TABLE IF NOT EXISTS names(jid TEXT PRIMARY KEY, name TEXT NOT NULL);
 ";
+
+/// Columns added after the first schema; each fails harmlessly when present.
+const MIGRATIONS: &[&str] = &[
+    "ALTER TABLE messages ADD COLUMN starred INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE messages ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE chats ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE chats ADD COLUMN muted_until INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE chats ADD COLUMN ephemeral INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE messages ADD COLUMN link_title TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE messages ADD COLUMN link_desc TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE messages ADD COLUMN poll TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE messages ADD COLUMN mentions_me INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE messages ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0",
+];
+
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct Chat {
+    pub jid: String,
+    pub name: String,
+    pub is_group: bool,
+    pub last_ts: i64,
+    pub unread: i64,
+    pub last_type: String,
+    pub last_text: String,
+    pub last_from_me: bool,
+    pub last_status: i32,
+    pub last_sender: String,
+    pub last_file: String,
+    pub archived: bool,
+    pub pinned: bool,
+    pub muted: bool,
+    pub ephemeral: i64,
+}
+
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct Reaction {
+    pub emoji: String,
+    pub sender: String,
+    pub name: String,
+    pub from_me: bool,
+}
+
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct Message {
+    pub id: String,
+    pub chat: String,
+    pub sender: String,
+    pub sender_name: String,
+    pub from_me: bool,
+    pub ts: i64,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub text: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub thumb: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub media_path: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub file_name: String,
+    pub w: i64,
+    pub h: i64,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub quoted_id: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub quoted_text: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub quoted_sender: String,
+    pub status: i32,
+    pub edited: bool,
+    pub deleted: bool,
+    pub starred: bool,
+    pub pinned: bool,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub link_title: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub link_desc: String,
+    pub mentions_me: bool,
+    pub reactions: Vec<Reaction>,
+}
+
+/// A message on its way into the database.
+#[derive(Clone, Debug, Default)]
+pub struct NewMessage {
+    pub chat: String,
+    pub id: String,
+    pub sender: String,
+    pub from_me: bool,
+    pub ts: i64,
+    pub kind: String,
+    pub text: String,
+    pub thumb: Option<Vec<u8>>,
+    pub raw: Option<Vec<u8>>,
+    pub file_name: String,
+    pub w: i64,
+    pub h: i64,
+    pub quoted_id: String,
+    pub quoted_text: String,
+    pub quoted_sender: String,
+    pub status: i32,
+    pub unread: bool,
+}
+
+const MSG_COLS: &str = "id,chat,sender,from_me,ts,type,text,thumb,media_path,file_name,w,h,quoted_id,quoted_text,quoted_sender,status,edited,deleted,starred,pinned,link_title,link_desc,mentions_me";
+
+pub struct Db {
+    conn: Mutex<Connection>,
+}
 
 impl Db {
     pub fn open(path: &Path) -> rusqlite::Result<Db> {
@@ -42,18 +172,16 @@ impl Db {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "cache_size", -1024)?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch(SCHEMA)?;
+        for migration in MIGRATIONS {
+            let _ = conn.execute_batch(migration);
+        }
         Ok(Db { conn: Mutex::new(conn) })
     }
 
-    pub fn in_memory() -> Db {
-        let conn = Connection::open_in_memory().expect("in-memory database");
-        conn.execute_batch(SCHEMA).expect("schema");
-        Db { conn: Mutex::new(conn) }
-    }
-
     /// Runs several writes as one transaction (a history sync is thousands).
-    pub fn batch<T>(&self, work: impl FnOnce(&Writer) -> T) -> T {
+    pub fn write<T>(&self, work: impl FnOnce(&Writer) -> T) -> T {
         let conn = self.conn.lock().unwrap();
         let _ = conn.execute_batch("BEGIN IMMEDIATE");
         let out = work(&Writer { conn: &conn });
@@ -61,184 +189,225 @@ impl Db {
         out
     }
 
-    pub fn chats(&self) -> Vec<Chat> {
+    /// A name for a chat or a person: the group's subject, the name they gave
+    /// themselves, or their number.
+    pub fn name_of(&self, jid: &str) -> String {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn
-            .prepare_cached(
-                "SELECT c.jid,
-                        COALESCE(NULLIF(c.name,''), (SELECT name FROM names n WHERE n.jid=c.jid), ''),
-                        c.last_ts, c.unread, c.pinned, c.archived,
-                        m.text, m.kind, m.from_me, m.status
-                 FROM chats c
-                 LEFT JOIN messages m ON m.chat=c.jid AND m.id=(
-                     SELECT id FROM messages WHERE chat=c.jid ORDER BY ts DESC, id DESC LIMIT 1)
-                 WHERE c.last_ts > 0
-                 ORDER BY c.pinned DESC, c.last_ts DESC LIMIT 600",
-            )
-            .expect("chats query");
-        let rows = stmt.query_map([], |r| {
-            let jid: String = r.get(0)?;
-            let name: String = r.get(1)?;
-            let text: Option<String> = r.get(6)?;
-            let kind: Option<String> = r.get(7)?;
-            Ok(Chat {
-                is_group: jid.ends_with("@g.us"),
-                name: if name.is_empty() { display_number(&jid) } else { name },
-                last_ts: r.get(2)?,
-                unread: r.get(3)?,
-                pinned: r.get(4)?,
-                archived: r.get(5)?,
-                last_text: preview(kind.as_deref().unwrap_or("text"), text.as_deref().unwrap_or("")),
-                last_from_me: r.get::<_, Option<bool>>(8)?.unwrap_or(false),
-                last_status: r.get::<_, Option<i32>>(9)?.unwrap_or(0),
-                jid,
-            })
-        });
-        rows.map(|rows| rows.flatten().collect()).unwrap_or_default()
+        name_of(&conn, jid)
     }
 
-    /// The newest `limit` messages of a chat, oldest first.
-    pub fn messages(&self, chat: &str, limit: usize) -> Vec<Message> {
+    pub fn chats(&self) -> Vec<Chat> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn
-            .prepare_cached(
-                "SELECT m.id, m.sender, m.from_me, m.ts, m.kind, m.text, m.status,
-                        COALESCE((SELECT name FROM names n WHERE n.jid=m.sender), '')
-                 FROM messages m WHERE m.chat=?1 ORDER BY m.ts DESC, m.id DESC LIMIT ?2",
-            )
-            .expect("messages query");
-        let rows = stmt.query_map(params![chat, limit as i64], |r| {
-            let sender: String = r.get(1)?;
-            let name: String = r.get(7)?;
-            Ok(Message {
-                id: r.get(0)?,
-                chat: chat.to_string(),
-                sender_name: if name.is_empty() { display_number(&sender) } else { name },
-                sender,
-                from_me: r.get(2)?,
-                ts: r.get(3)?,
-                kind: r.get(4)?,
-                text: r.get(5)?,
-                status: r.get(6)?,
-            })
-        });
-        let mut list: Vec<Message> = rows.map(|rows| rows.flatten().collect()).unwrap_or_default();
+        let mut list: Vec<(Chat, String)> = {
+            let mut stmt = conn
+                .prepare_cached(
+                    "SELECT c.jid, c.last_ts, c.unread, c.archived, c.pinned,
+                            (c.muted_until < 0 OR c.muted_until > strftime('%s','now')), c.ephemeral,
+                            COALESCE(m.type,''), COALESCE(m.text,''), COALESCE(m.from_me,0), COALESCE(m.status,0),
+                            COALESCE(m.sender,''), COALESCE(m.deleted,0), COALESCE(m.file_name,'')
+                     FROM chats c LEFT JOIN messages m ON m.chat=c.jid
+                          AND m.id=(SELECT id FROM messages WHERE chat=c.jid ORDER BY ts DESC, id DESC LIMIT 1)
+                     WHERE c.last_ts>0 ORDER BY c.pinned DESC, c.last_ts DESC LIMIT 600",
+                )
+                .expect("chats query");
+            let rows = stmt.query_map([], |r| {
+                let jid: String = r.get(0)?;
+                let deleted: bool = r.get(12)?;
+                Ok((
+                    Chat {
+                        is_group: jid.ends_with("@g.us"),
+                        jid,
+                        last_ts: r.get(1)?,
+                        unread: r.get(2)?,
+                        archived: r.get(3)?,
+                        pinned: r.get(4)?,
+                        muted: r.get(5)?,
+                        ephemeral: r.get(6)?,
+                        last_type: if deleted { "deleted".into() } else { r.get(7)? },
+                        last_text: if deleted { String::new() } else { r.get(8)? },
+                        last_from_me: r.get(9)?,
+                        last_status: r.get(10)?,
+                        last_file: r.get(13)?,
+                        ..Default::default()
+                    },
+                    r.get::<_, String>(11)?,
+                ))
+            });
+            rows.map(|rows| rows.flatten().collect()).unwrap_or_default()
+        };
+        for (chat, sender) in &mut list {
+            chat.name = name_of(&conn, &chat.jid);
+            if chat.is_group && !chat.last_from_me && !sender.is_empty() {
+                chat.last_sender = name_of(&conn, sender);
+            }
+        }
+        list.into_iter().map(|(chat, _)| chat).collect()
+    }
+
+    /// Messages matching `tail` (a WHERE clause and whatever follows it).
+    pub fn query(&self, tail: &str, args: &[&dyn rusqlite::ToSql]) -> Vec<Message> {
+        let conn = self.conn.lock().unwrap();
+        let mut list: Vec<Message> = {
+            let Ok(mut stmt) = conn.prepare_cached(&format!("SELECT {MSG_COLS} FROM messages WHERE {tail}")) else {
+                return Vec::new();
+            };
+            let rows = stmt.query_map(args, message_from);
+            rows.map(|rows| rows.flatten().collect()).unwrap_or_default()
+        };
+        if list.is_empty() {
+            return list;
+        }
+        for message in &mut list {
+            if !message.from_me {
+                message.sender_name = name_of(&conn, &message.sender);
+            }
+            if !message.quoted_sender.is_empty() {
+                message.quoted_sender = name_of(&conn, &message.quoted_sender);
+            }
+        }
+        // Reactions for the whole page in one query.
+        let marks = vec!["?"; list.len()].join(",");
+        let chat = list[0].chat.clone();
+        let ids: Vec<String> = std::iter::once(chat).chain(list.iter().map(|m| m.id.clone())).collect();
+        if let Ok(mut stmt) = conn.prepare(&format!("SELECT msg_id,sender,emoji FROM reactions WHERE chat=? AND msg_id IN ({marks})")) {
+            let found: Vec<(String, String, String)> = stmt
+                .query_map(params_from_iter(ids.iter()), |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .map(|rows| rows.flatten().collect())
+                .unwrap_or_default();
+            for (id, sender, emoji) in found {
+                if let Some(message) = list.iter_mut().find(|m| m.id == id) {
+                    message.reactions.push(Reaction { emoji, name: name_of(&conn, &sender), from_me: sender.is_empty(), sender });
+                }
+            }
+        }
+        list
+    }
+
+    /// One page in ascending order: the newest, or the one just older than
+    /// (`before_ts`, `before_id`).
+    pub fn messages(&self, chat: &str, before_ts: i64, before_id: &str, limit: i64) -> Vec<Message> {
+        let limit = if limit <= 0 || limit > 200 { 50 } else { limit };
+        let mut list = if before_ts > 0 {
+            self.query("chat=?1 AND (ts,id) < (?2,?3) ORDER BY ts DESC, id DESC LIMIT ?4", &[&chat, &before_ts, &before_id, &limit])
+        } else {
+            self.query("chat=?1 ORDER BY ts DESC, id DESC LIMIT ?2", &[&chat, &limit])
+        };
         list.reverse();
         list
     }
 
-    pub fn unread_ids(&self, chat: &str, count: u32) -> Vec<(String, String)> {
+    pub fn message(&self, chat: &str, id: &str) -> Option<Message> {
+        self.query("chat=?1 AND id=?2", &[&chat, &id]).into_iter().next()
+    }
+
+    pub fn count(&self, sql: &str, args: &[&dyn rusqlite::ToSql]) -> i64 {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn
-            .prepare_cached("SELECT id, sender FROM messages WHERE chat=?1 AND from_me=0 ORDER BY ts DESC, id DESC LIMIT ?2")
-            .expect("unread query");
-        let rows = stmt.query_map(params![chat, count], |r| Ok((r.get(0)?, r.get(1)?)));
+        conn.query_row(sql, args, |r| r.get(0)).optional().ok().flatten().unwrap_or(0)
+    }
+
+    /// Ids and senders of the messages not yet read in a chat.
+    pub fn unread_messages(&self, chat: &str) -> Vec<(String, String)> {
+        let conn = self.conn.lock().unwrap();
+        let Ok(mut stmt) = conn.prepare_cached("SELECT id,sender FROM messages WHERE chat=?1 AND unread=1 AND from_me=0") else {
+            return Vec::new();
+        };
+        let rows = stmt.query_map([chat], |r| Ok((r.get(0)?, r.get(1)?)));
         rows.map(|rows| rows.flatten().collect()).unwrap_or_default()
     }
 
-    pub fn unread(&self, chat: &str) -> u32 {
-        let conn = self.conn.lock().unwrap();
-        conn.query_row("SELECT unread FROM chats WHERE jid=?1", [chat], |r| r.get(0)).optional().ok().flatten().unwrap_or(0)
+    pub fn is_muted(&self, chat: &str) -> bool {
+        self.count("SELECT (muted_until < 0 OR muted_until > strftime('%s','now')) FROM chats WHERE jid=?1", &[&chat]) != 0
     }
 }
 
-/// Writes, inside [`Db::batch`].
-pub struct Writer<'a> {
-    conn: &'a Connection,
+fn message_from(r: &Row) -> rusqlite::Result<Message> {
+    let thumb: Option<Vec<u8>> = r.get(7)?;
+    Ok(Message {
+        id: r.get(0)?,
+        chat: r.get(1)?,
+        sender: r.get(2)?,
+        from_me: r.get(3)?,
+        ts: r.get(4)?,
+        kind: r.get(5)?,
+        text: r.get(6)?,
+        thumb: thumb.filter(|t| !t.is_empty()).map(|t| base64::engine::general_purpose::STANDARD.encode(t)).unwrap_or_default(),
+        media_path: r.get(8)?,
+        file_name: r.get(9)?,
+        w: r.get(10)?,
+        h: r.get(11)?,
+        quoted_id: r.get(12)?,
+        quoted_text: r.get(13)?,
+        quoted_sender: r.get(14)?,
+        status: r.get(15)?,
+        edited: r.get(16)?,
+        deleted: r.get(17)?,
+        starred: r.get(18)?,
+        pinned: r.get(19)?,
+        link_title: r.get(20)?,
+        link_desc: r.get(21)?,
+        mentions_me: r.get(22)?,
+        ..Default::default()
+    })
 }
 
-impl Writer<'_> {
-    /// Adds a message; false if it was already there.
-    pub fn insert_message(&self, m: &Message) -> bool {
-        self.conn
-            .prepare_cached(
-                "INSERT OR IGNORE INTO messages(chat,id,sender,from_me,ts,kind,text,status) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
-            )
-            .and_then(|mut s| s.execute(params![m.chat, m.id, m.sender, m.from_me, m.ts, m.kind, m.text, m.status]))
-            .map(|n| n > 0)
-            .unwrap_or(false)
+fn name_of(conn: &Connection, jid: &str) -> String {
+    if jid.is_empty() {
+        return String::new();
     }
-
-    /// Makes sure the chat exists and is no older than `ts` in the list.
-    pub fn touch_chat(&self, jid: &str, ts: i64) {
-        let _ = self.conn.execute(
-            "INSERT INTO chats(jid,last_ts) VALUES(?1,?2) ON CONFLICT(jid) DO UPDATE SET last_ts=MAX(last_ts, excluded.last_ts)",
-            params![jid, ts],
-        );
-    }
-
-    pub fn set_chat_name(&self, jid: &str, name: &str) {
-        if !name.is_empty() {
-            let _ = self.conn.execute("UPDATE chats SET name=?2 WHERE jid=?1", params![jid, name]);
-        }
-    }
-
-    pub fn set_chat_flags(&self, jid: &str, archived: bool, pinned: bool) {
-        let _ = self.conn.execute("UPDATE chats SET archived=?2, pinned=?3 WHERE jid=?1", params![jid, archived, pinned]);
-    }
-
-    pub fn set_unread(&self, jid: &str, unread: u32) {
-        let _ = self.conn.execute("UPDATE chats SET unread=?2 WHERE jid=?1", params![jid, unread]);
-    }
-
-    pub fn add_unread(&self, jid: &str) {
-        let _ = self.conn.execute("UPDATE chats SET unread=unread+1 WHERE jid=?1", [jid]);
-    }
-
-    /// A person's name as they set it themselves.
-    pub fn set_name(&self, jid: &str, name: &str) {
-        if !name.is_empty() {
-            let _ = self.conn.execute(
-                "INSERT INTO names(jid,name) VALUES(?1,?2) ON CONFLICT(jid) DO UPDATE SET name=excluded.name",
-                params![jid, name],
-            );
-        }
-    }
-
-    /// Raises a sent message's status; true if that changed anything.
-    pub fn raise_status(&self, chat: &str, id: &str, status: i32) -> bool {
-        self.conn
-            .execute(
-                "UPDATE messages SET status=?3 WHERE chat=?1 AND id=?2 AND from_me=1 AND status>=0 AND status<?3",
-                params![chat, id, status],
-            )
-            .map(|n| n > 0)
-            .unwrap_or(false)
-    }
-
-    pub fn set_status(&self, chat: &str, id: &str, status: i32) {
-        let _ = self.conn.execute("UPDATE messages SET status=?3 WHERE chat=?1 AND id=?2", params![chat, id, status]);
-    }
-
-    /// A message sent optimistically got its real id from the library.
-    pub fn rename_message(&self, chat: &str, from: &str, to: &str) {
-        let _ = self.conn.execute("UPDATE OR REPLACE messages SET id=?3 WHERE chat=?1 AND id=?2", params![chat, from, to]);
-    }
+    let stored: Option<String> = conn
+        .query_row(
+            "SELECT COALESCE(NULLIF((SELECT name FROM chats WHERE jid=?1),''), (SELECT name FROM names WHERE jid=?1))",
+            [jid],
+            |r| r.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten()
+        .flatten();
+    stored.filter(|name: &String| !name.is_empty()).unwrap_or_else(|| display_number(jid))
 }
 
-/// "+90 555 123 45 67"-ish for a JID with no known name.
+/// "+905551234567" for a JID with no known name.
 pub fn display_number(jid: &str) -> String {
     let user = jid.split('@').next().unwrap_or(jid).split(':').next().unwrap_or(jid);
-    if jid.ends_with("@s.whatsapp.net") && user.chars().all(|c| c.is_ascii_digit()) {
+    if jid.ends_with("@s.whatsapp.net") && !user.is_empty() && user.chars().all(|c| c.is_ascii_digit()) {
         format!("+{user}")
     } else {
         user.to_string()
     }
 }
 
-/// The chat list's one line for a message.
-pub fn preview(kind: &str, text: &str) -> String {
-    match kind {
-        "text" => text.to_string(),
-        "image" => caption("📷 Photo", text),
-        "video" => caption("🎥 Video", text),
-        "audio" => "🎤 Voice message".to_string(),
-        "document" => caption("📄 Document", text),
-        "sticker" => "Sticker".to_string(),
-        _ => if text.is_empty() { "Message".to_string() } else { text.to_string() },
-    }
+/// Writes, inside [`Db::write`].
+pub struct Writer<'a> {
+    conn: &'a Connection,
 }
 
-fn caption(label: &str, text: &str) -> String {
-    if text.is_empty() { label.to_string() } else { format!("{label} · {text}") }
+impl Writer<'_> {
+    pub fn exec(&self, sql: &str, args: &[&dyn rusqlite::ToSql]) -> usize {
+        self.conn.prepare_cached(sql).and_then(|mut s| s.execute(args)).unwrap_or(0)
+    }
+
+    /// Adds a message; false if it was already there.
+    pub fn insert_message(&self, m: &NewMessage) -> bool {
+        self.exec(
+            "INSERT OR IGNORE INTO messages(chat,id,sender,from_me,ts,type,text,thumb,raw,file_name,w,h,quoted_id,quoted_text,quoted_sender,status,unread)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
+            params![m.chat, m.id, m.sender, m.from_me, m.ts, m.kind, m.text, m.thumb, m.raw, m.file_name, m.w, m.h, m.quoted_id, m.quoted_text, m.quoted_sender, m.status, m.unread],
+        ) > 0
+    }
+
+    /// Makes sure the chat exists and is no older than `ts` in the list.
+    pub fn touch_chat(&self, jid: &str, ts: i64) {
+        self.exec(
+            "INSERT INTO chats(jid,last_ts) VALUES(?1,?2) ON CONFLICT(jid) DO UPDATE SET last_ts=MAX(last_ts, excluded.last_ts)",
+            params![jid, ts],
+        );
+    }
+
+    /// A person's name as they set it themselves.
+    pub fn set_name(&self, jid: &str, name: &str) {
+        if !jid.is_empty() && !name.is_empty() {
+            self.exec("INSERT INTO names(jid,name) VALUES(?1,?2) ON CONFLICT(jid) DO UPDATE SET name=excluded.name", params![jid, name]);
+        }
+    }
 }
