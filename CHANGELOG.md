@@ -2,6 +2,10 @@
 
 The section for the running version is shown in the app after an update.
 
+## 1.0.5
+
+- The app is now a universal build: the same download runs on Intel Macs as well as Apple silicon (macOS 26 or later). The Intel half has not been run on an Intel Mac yet
+
 ## 1.0.4
 
 - Mentions show the person's name again where they showed a long number: in groups that hide phone numbers, in quoted messages and in messages that came with the history

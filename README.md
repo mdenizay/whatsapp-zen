@@ -47,7 +47,7 @@ unencrypted on disk; rely on FileVault for encryption at rest.
 
 ## Install
 
-Requires macOS 26 or later on Apple silicon.
+Requires macOS 26 or later. One download runs on both Apple silicon and Intel Macs (the Intel half is built but has not been run on an Intel Mac yet; reports are welcome).
 
 ```bash
 brew install --cask mdenizay/tap/whatsapp-zen

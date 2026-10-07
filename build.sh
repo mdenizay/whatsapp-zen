@@ -17,14 +17,24 @@ if [ "${CORE:-rust}" = "rust" ]; then
     # Opus (the sound of some calls) is built from source into the library, so
     # the app needs nothing installed; its build needs cmake, and a setting
     # for its old CMake file.
-    (cd "$ROOT/zen" && MACOSX_DEPLOYMENT_TARGET=14.0 LIBOPUS_STATIC=1 LIBOPUS_NO_PKG=1 CMAKE_POLICY_VERSION_MINIMUM=3.5 \
-        cargo build --release -p zen-core)
+    # Built for Apple Silicon and for Intel, and joined into one library; the
+    # Intel half needs `rustup target add x86_64-apple-darwin`.
     mkdir -p "$ROOT/core/build"
-    cp "$ROOT/zen/target/release/libzen_core.a" "$ROOT/core/build/libwacore.a"
+    SLICES=()
+    for TARGET in aarch64-apple-darwin x86_64-apple-darwin; do
+        (cd "$ROOT/zen" && MACOSX_DEPLOYMENT_TARGET=14.0 LIBOPUS_STATIC=1 LIBOPUS_NO_PKG=1 CMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            cargo build --release -p zen-core --target "$TARGET")
+        SLICES+=("$ROOT/zen/target/$TARGET/release/libzen_core.a")
+    done
+    lipo -create "${SLICES[@]}" -output "$ROOT/core/build/libwacore.a"
+    ARCHS=(--arch arm64 --arch x86_64)
+    BINARY="$ROOT/app/.build/out/Products/Release/WhatsAppZen"
 else
     echo "==> core (Go)"
     (cd "$ROOT/core" && CGO_ENABLED=1 MACOSX_DEPLOYMENT_TARGET=14.0 CGO_CFLAGS="-O2 -w" \
         go build -buildmode=c-archive -trimpath -ldflags="-s -w" -o build/libwacore.a .)
+    ARCHS=()
+    BINARY="$ROOT/app/.build/release/WhatsAppZen"
 fi
 
 echo "==> app (Swift)"
@@ -40,12 +50,12 @@ if ! xcodebuild -version >/dev/null 2>&1; then
     SDK26="$(ls -d /Library/Developer/CommandLineTools/SDKs/MacOSX26.[0-9]*.sdk 2>/dev/null | sort -V | tail -1)"
     [ -n "$SDK26" ] && SDK_ARGS=(--sdk "$SDK26")
 fi
-(cd "$ROOT/app" && swift build -c release ${SDK_ARGS[@]+"${SDK_ARGS[@]}"})
+(cd "$ROOT/app" && swift build -c release ${ARCHS[@]+"${ARCHS[@]}"} ${SDK_ARGS[@]+"${SDK_ARGS[@]}"})
 
 echo "==> bundle"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$ROOT/app/.build/release/WhatsAppZen" "$APP/Contents/MacOS/"
+cp "$BINARY" "$APP/Contents/MacOS/"
 cp "$ROOT/app/Info.plist" "$APP/Contents/"
 [ -f "$ROOT/app/AppIcon.icns" ] && cp "$ROOT/app/AppIcon.icns" "$APP/Contents/Resources/"
 cp -R "$ROOT/app/Resources/"* "$APP/Contents/Resources/"
