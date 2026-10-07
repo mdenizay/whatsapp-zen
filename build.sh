@@ -1,13 +1,19 @@
 #!/bin/bash
-# Builds the Go core, the Swift app, and assembles "dist/WhatsApp Zen.app".
+# Builds the core, the Swift app, and assembles "dist/WhatsApp Zen.app".
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 APP="$ROOT/dist/WhatsApp Zen.app"
 
-# CORE=rust links the Rust core (zen/core) instead of the Go one. Both are a
-# static library with the same three C functions, so the app is the same.
-if [ "${CORE:-go}" = "rust" ]; then
+# The core is the Rust one (zen/core). CORE=go links the old Go core instead;
+# both are a static library with the same C functions, so the app is the same.
+if [ "${CORE:-rust}" = "rust" ]; then
     echo "==> core (Rust)"
+    # The official toolchain (rustup) builds for older versions of macOS too;
+    # Homebrew's own Rust only targets the macOS it was built on.
+    RUSTUP_BIN="$(brew --prefix rustup 2>/dev/null)/bin"
+    if [ -x "$RUSTUP_BIN/cargo" ]; then
+        export PATH="$RUSTUP_BIN:$PATH" RUSTUP_TOOLCHAIN=stable
+    fi
     (cd "$ROOT/zen" && MACOSX_DEPLOYMENT_TARGET=14.0 cargo build --release -p zen-core)
     mkdir -p "$ROOT/core/build"
     cp "$ROOT/zen/target/release/libzen_core.a" "$ROOT/core/build/libwacore.a"

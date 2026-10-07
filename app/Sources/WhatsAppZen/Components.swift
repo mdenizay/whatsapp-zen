@@ -197,6 +197,12 @@ struct PairingView: View {
     @EnvironmentObject var store: AppStore
     @EnvironmentObject var model: AppModel
 
+    /// This account was linked with the earlier engine: its data is here,
+    /// only the link is not.
+    private var upgraded: Bool {
+        FileManager.default.fileExists(atPath: AppStore.dataDir.appendingPathComponent("accounts/\(store.id)/store.db").path)
+    }
+
     var body: some View {
         HStack(spacing: 44) {
             VStack(alignment: .leading, spacing: 18) {
@@ -205,6 +211,13 @@ struct PairingView: View {
                     step(1, L("Open WhatsApp on your phone"))
                     step(2, L("Settings → Linked Devices → Link a Device"))
                     step(3, L("Point your phone at this code"))
+                }
+                if upgraded {
+                    // 1.0 talks to WhatsApp through a new engine; the old link cannot be carried over.
+                    Label(L("This version connects to WhatsApp in a new way, so it has to be linked once more. Your chats and messages are still here."),
+                          systemImage: "arrow.triangle.2.circlepath")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .frame(maxWidth: 340, alignment: .leading)
                 }
                 if let error = store.errorText {
                     Text(error).foregroundStyle(.red).font(.callout)

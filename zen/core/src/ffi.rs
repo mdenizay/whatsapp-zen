@@ -23,10 +23,24 @@ struct Core {
 static CORE: OnceLock<Core> = OnceLock::new();
 
 impl Core {
-    /// While the Rust core is being brought up next to the Go one, its
-    /// accounts live in their own folder, so neither touches the other's.
+    /// One folder per account, the same ones the Go core used: the chats and
+    /// messages in them are kept, and only the link to WhatsApp is new.
     fn accounts_dir(&self) -> PathBuf {
-        self.base.join("accounts-rust")
+        self.base.join("accounts")
+    }
+
+    /// While this core was developed next to the Go one it kept its accounts
+    /// in "accounts-rust". A link made there is carried over, so that Mac
+    /// does not have to be linked a second time.
+    fn adopt_development_session(&self, id: &str) {
+        let (old, new) = (self.base.join("accounts-rust").join(id), self.accounts_dir().join(id));
+        if new.join("session.db").exists() || !old.join("session.db").exists() {
+            return;
+        }
+        let _ = std::fs::create_dir_all(&new);
+        for name in ["session.db", "session.db-wal", "session.db-shm"] {
+            let _ = std::fs::rename(old.join(name), new.join(name));
+        }
     }
 
     fn list(&self) -> Vec<String> {
@@ -46,6 +60,7 @@ impl Core {
         if accounts.contains_key(id) {
             return Ok(());
         }
+        self.adopt_development_session(id);
         let account = Account::start(id, self.accounts_dir().join(id), self.rt.handle().clone(), self.emit.clone())?;
         accounts.insert(id.to_string(), account);
         Ok(())
@@ -93,7 +108,7 @@ pub unsafe extern "C" fn WAStart(data_dir: *const c_char, callback: Callback) {
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).thread_name("zen-core").enable_all().build().expect("runtime");
     let core = Core { base, rt, emit, accounts: Mutex::new(HashMap::new()) };
     let _ = std::fs::create_dir_all(core.accounts_dir());
-    crate::logfile::start(&core.accounts_dir());
+    crate::logfile::start(&core.base);
     let _ = CORE.set(core);
 }
 

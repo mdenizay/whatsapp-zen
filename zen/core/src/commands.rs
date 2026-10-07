@@ -681,26 +681,6 @@ impl Account {
         self.send(json!({"type": "chats"}));
     }
 
-    /// Reads the account's synced settings from scratch, once: address-book
-    /// names, and which chats are pinned, muted or archived. They arrive as
-    /// the same events a change on another device would send. A device that
-    /// was linked before this core could take them in would otherwise never
-    /// see them, since afterwards only changes are sent.
-    pub(crate) async fn resync_settings(self: &Arc<Self>) {
-        use whatsapp_rust::sync_task::MajorSyncTask;
-        use whatsapp_rust::wacore::appstate::patch_decode::WAPatchName;
-        let marker = self.dir.join(".settings-synced-1");
-        if marker.exists() {
-            return;
-        }
-        let Ok(client) = self.client() else { return };
-        for name in [WAPatchName::CriticalBlock, WAPatchName::CriticalUnblockLow, WAPatchName::RegularLow, WAPatchName::RegularHigh, WAPatchName::Regular] {
-            client.process_sync_task(MajorSyncTask::AppStateSync { name, full_sync: true }).await;
-        }
-        let _ = std::fs::write(marker, b"");
-        self.send(json!({"type": "chats"}));
-    }
-
     /// Whether the user's own read receipts are off. WhatsApp then shows them
     /// nobody else's in one-to-one chats, so neither does this app; turning
     /// them off also takes back the blue ticks already shown there.
@@ -1015,6 +995,21 @@ impl Account {
                         "type": "message", "chat": chat, "chat_name": self.db.name_of(&chat), "msg": self.db.message(&chat, &row.id),
                         "notify": !from_me && now() - row.ts < 120 && !self.db.is_muted(&chat),
                     }));
+                }
+            }
+            Event::GroupUpdate(update) => {
+                // Something about a group changed (its name, its members): read its name again.
+                let chat = update.group_jid.to_non_ad().to_string();
+                if let Ok(client) = self.client() {
+                    if let Ok(group) = client.groups().get_metadata(&update.group_jid).await {
+                        if !group.subject.is_empty() {
+                            self.db.write(|w| {
+                                w.touch_chat(&chat, 0);
+                                w.exec("UPDATE chats SET name=?2 WHERE jid=?1", &[&chat, &group.subject])
+                            });
+                            self.send(json!({"type": "chats"}));
+                        }
+                    }
                 }
             }
             Event::MarkChatAsReadUpdate(update) => {

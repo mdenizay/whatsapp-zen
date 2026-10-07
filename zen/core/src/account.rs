@@ -684,7 +684,6 @@ impl Account {
                 self.refresh_privacy().await;
                 self.refresh_groups().await;
                 self.announce_presence();
-                self.resync_settings().await;
             }
             Event::PairSuccess(_) => self.set_state("connecting", ""),
             Event::LoggedOut(_) => self.set_state("logged_out", ""),
