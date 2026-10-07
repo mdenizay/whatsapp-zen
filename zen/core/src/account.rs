@@ -34,6 +34,23 @@ pub struct Request {
     pub unlink: bool,
     pub emoji: String,
     pub seconds: i64,
+    /// A length of time for muting and disappearing messages, in seconds.
+    pub duration: i64,
+    pub path: String,
+    pub thumb: String,
+    pub w: i64,
+    pub h: i64,
+    pub kind: String,
+    pub mime: String,
+    pub file_name: String,
+    pub phone: String,
+    pub to: String,
+    pub options: Vec<String>,
+    pub mentions: Vec<String>,
+    pub lat: f64,
+    pub lng: f64,
+    pub plain: bool,
+    pub action: String,
 }
 
 struct Status {
@@ -45,11 +62,15 @@ struct Status {
 pub struct Account {
     pub id: String,
     pub dir: PathBuf,
-    db: Db,
-    rt: tokio::runtime::Handle,
+    pub(crate) db: Db,
+    pub(crate) rt: tokio::runtime::Handle,
     client: Mutex<Option<Arc<Client>>>,
     status: Mutex<Status>,
     emit: Emit,
+    /// Whether the user is at the app; decides the presence we announce.
+    pub(crate) available: std::sync::atomic::AtomicBool,
+    /// Per chat, the oldest message history was last asked from, and when.
+    pub(crate) history_asked: Mutex<std::collections::HashMap<String, (String, std::time::Instant)>>,
 }
 
 impl Account {
@@ -67,6 +88,8 @@ impl Account {
             client: Mutex::new(None),
             status: Mutex::new(Status { state: "starting", qr: String::new() }),
             emit,
+            available: std::sync::atomic::AtomicBool::new(false),
+            history_asked: Mutex::new(Default::default()),
         });
         let me = account.clone();
         account.rt.spawn(async move {
@@ -103,13 +126,13 @@ impl Account {
         Ok(())
     }
 
-    fn send(&self, mut event: Value) {
+    pub(crate) fn send(&self, mut event: Value) {
         event["account"] = Value::String(self.id.clone());
         (self.emit)(event);
     }
 
     /// Our own phone-number id, once linked.
-    fn me(&self) -> String {
+    pub(crate) fn me(&self) -> String {
         self.client().ok().and_then(|client| client.pn()).map(|jid| jid.to_non_ad().to_string()).unwrap_or_default()
     }
 
@@ -118,7 +141,7 @@ impl Account {
         json!({"type": "state", "state": status.state, "qr": status.qr, "me": self.me()})
     }
 
-    fn set_state(&self, state: &'static str, qr: &str) {
+    pub(crate) fn set_state(&self, state: &'static str, qr: &str) {
         {
             let mut status = self.status.lock().unwrap();
             if status.state == state && status.qr == qr {
@@ -130,12 +153,12 @@ impl Account {
         self.send(self.state_json());
     }
 
-    fn changed(&self, chat: &str) {
+    pub(crate) fn changed(&self, chat: &str) {
         self.send(json!({"type": "messages", "chat": chat}));
         self.send(json!({"type": "chats"}));
     }
 
-    fn client(&self) -> Result<Arc<Client>, String> {
+    pub(crate) fn client(&self) -> Result<Arc<Client>, String> {
         self.client.lock().unwrap().clone().ok_or_else(|| "not connected".to_string())
     }
 
@@ -149,13 +172,20 @@ impl Account {
             "messages" => list(self.db.messages(&r.chat, r.before_ts, &r.before_id, r.limit)),
             "starred" => list(self.db.query("chat=?1 AND starred=1 AND deleted=0 ORDER BY ts DESC LIMIT 200", &[&r.chat])),
             "pinned" => list(self.db.query("chat=?1 AND pinned=1 AND deleted=0 ORDER BY ts DESC LIMIT 20", &[&r.chat])),
-            "search" => {
-                let like = format!("%{}%", r.text);
-                list(self.db.query("chat=?1 AND deleted=0 AND text LIKE ?2 ORDER BY ts DESC LIMIT 100", &[&r.chat, &like]))
-            }
-            "search_all" => {
-                let like = format!("%{}%", r.text);
-                list(self.db.query("deleted=0 AND type='text' AND text LIKE ?1 ORDER BY ts DESC LIMIT 40", &[&like]))
+            "search" | "search_all" => {
+                let text = r.text.trim();
+                if text.is_empty() {
+                    return Ok(json!([]));
+                }
+                let like = format!("%{}%", text.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
+                if r.cmd == "search" {
+                    list(self.db.query(
+                        "chat=?1 AND deleted=0 AND (text LIKE ?2 ESCAPE '\\' OR file_name LIKE ?2 ESCAPE '\\') ORDER BY ts DESC LIMIT 100",
+                        &[&r.chat, &like],
+                    ))
+                } else {
+                    list(self.db.query("deleted=0 AND type IN ('text','other') AND text LIKE ?1 ESCAPE '\\' ORDER BY ts DESC LIMIT 60", &[&like]))
+                }
             }
             "count_since" => Ok(json!(self.db.count("SELECT COUNT(*) FROM messages WHERE chat=?1 AND ts>=?2", &[&r.chat, &r.ts]))),
             "count_from" => Ok(json!(self.db.count(
@@ -170,96 +200,45 @@ impl Account {
             "avatar" => Ok(Value::String(self.avatar(if r.jid.is_empty() { &r.chat } else { &r.jid }))),
             "archive" => self.chat_action(&r.chat, "archived", r.on),
             "pin_chat" => self.chat_action(&r.chat, "pinned", r.on),
-            "mute" => self.mute(&r.chat, r.seconds),
+            "mute" => self.mute(&r.chat, r.duration),
+            "send_image" | "send_file" | "forward" | "pin_message" | "delete_for_me" | "fetch_history" | "group_info" | "group_update"
+            | "group_rename" | "group_leave" | "group_link" | "typing" | "presence" | "subscribe" | "subscribe_presence" | "contacts"
+            | "start_chat" | "logout" | "block" | "cache_size" | "cache_list" | "cache_remove" | "clear_cache" | "reject_call" => self.more(r),
             "star" => self.star(&r.chat, &r.id, r.on),
             "mark_read" => {
                 self.mark_read(&r.chat);
                 Ok(Value::Null)
             }
             // Asked for constantly and harmless to leave for later.
-            "presence" | "subscribe" | "typing" | "fetch_history" => Ok(Value::Null),
-            "contacts" | "statuses" | "stickers" | "chat_media" | "cache_list" => Ok(json!([])),
-            "cache_size" => Ok(json!(0)),
+            "statuses" | "stickers" | "chat_media" => Ok(json!([])),
             other => Err(format!("\"{other}\" is not available in the Rust core yet")),
         }
     }
 
-    /// Sends a text. It shows at once as pending and settles when the server
-    /// has taken it.
+    /// Sends a text, quoting the message it answers.
     fn send_text(self: &Arc<Self>, chat: &str, text: &str, reply_to: &str) -> Result<Value, String> {
         let text = text.trim().to_string();
         if text.is_empty() {
-            return Err("empty message".into());
+            return Err("Empty message".into());
         }
-        let client = self.client()?;
-        let jid: Jid = chat.parse().map_err(|_| "bad chat id".to_string())?;
-        let now = now();
-        let pending = format!("pending-{}", now_nanos());
-        // What is being answered, for the quote above the reply.
-        let quoted = (!reply_to.is_empty())
-            .then(|| self.db.get("SELECT sender, from_me, text, type FROM messages WHERE chat=?1 AND id=?2", &[&chat, &reply_to], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
-            }))
-            .flatten();
-        let me = self.me();
-        let outgoing = match &quoted {
-            None => wa::Message::text(text.clone()),
-            Some((sender, from_me, quoted_text, _)) => wa::Message {
+        let mut row = self.new_row(chat, "text", &text)?;
+        let context = self.reply_context(&mut row, reply_to);
+        let message = match context {
+            None => wa::Message::text(text),
+            Some(context) => wa::Message {
                 extended_text_message: MessageField::some(wa::message::ExtendedTextMessage {
-                    text: Some(text.clone()),
-                    context_info: MessageField::some(wa::ContextInfo {
-                        stanza_id: Some(reply_to.to_string()),
-                        participant: Some(if *from_me { me.clone() } else if sender.is_empty() { chat.to_string() } else { sender.clone() }),
-                        quoted_message: MessageField::some(wa::Message { conversation: Some(quoted_text.clone()), ..Default::default() }),
-                        ..Default::default()
-                    }),
+                    text: Some(text),
+                    context_info: MessageField::some(context),
                     ..Default::default()
                 }),
                 ..Default::default()
             },
         };
-        self.db.write(|w| {
-            w.touch_chat(chat, now);
-            w.insert_message(&NewMessage {
-                chat: chat.to_string(),
-                id: pending.clone(),
-                from_me: true,
-                ts: now,
-                kind: "text".into(),
-                text: text.clone(),
-                status: status::PENDING,
-                quoted_id: reply_to.to_string(),
-                quoted_text: quoted.as_ref().map(|q| q.2.clone()).unwrap_or_default(),
-                quoted_sender: quoted.as_ref().map(|q| if q.1 { me.clone() } else { q.0.clone() }).unwrap_or_default(),
-                ..Default::default()
-            });
-            // Writing in a chat means having read it.
-            w.exec("UPDATE messages SET unread=0 WHERE chat=?1 AND unread=1", &[&chat]);
-            w.exec("UPDATE chats SET unread=0 WHERE jid=?1", &[&chat]);
-        });
-        self.changed(chat);
-        let shown = self.db.message(chat, &pending);
-        let me = self.clone();
-        let chat = chat.to_string();
-        self.rt.spawn(async move {
-            match client.send_message(jid, outgoing).await {
-                Ok(sent) => {
-                    let id = sent.message_id.to_string();
-                    me.db.write(|w| {
-                        w.exec("UPDATE OR REPLACE messages SET id=?3, status=?4 WHERE chat=?1 AND id=?2", &[&chat, &pending, &id, &status::SENT]);
-                    });
-                }
-                Err(_) => {
-                    me.db.write(|w| w.exec("UPDATE messages SET status=?3 WHERE chat=?1 AND id=?2", &[&chat, &pending, &status::FAILED]));
-                }
-            }
-            me.changed(&chat);
-        });
-        serde_json::to_value(shown).map_err(|e| e.to_string())
+        self.deliver(row, move |_| async move { Ok(message) })
     }
 
     /// The key that names a stored message to the protocol.
-    fn key(&self, chat: &str, id: &str) -> Result<(wa::MessageKey, String, bool), String> {
+    pub(crate) fn key(&self, chat: &str, id: &str) -> Result<(wa::MessageKey, String, bool), String> {
         let (sender, from_me) = self
             .db
             .get("SELECT sender, from_me FROM messages WHERE chat=?1 AND id=?2", &[&chat, &id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?)))
@@ -480,7 +459,7 @@ impl Account {
     /// The chat or person behind a JID, by phone number where it is known.
     /// WhatsApp addresses many people by a hidden id ("…@lid"); without this
     /// one person would show up as two chats.
-    async fn pn(&self, jid: &Jid) -> String {
+    pub(crate) async fn pn(&self, jid: &Jid) -> String {
         let plain = jid.to_non_ad();
         if plain.is_lid() {
             if let Ok(client) = self.client() {
@@ -492,7 +471,7 @@ impl Account {
         plain.to_string()
     }
 
-    async fn pn_str(&self, jid: &str) -> String {
+    pub(crate) async fn pn_str(&self, jid: &str) -> String {
         if !jid.ends_with("@lid") {
             return jid.to_string();
         }
@@ -754,14 +733,14 @@ impl Account {
                 self.send(json!({"type": "chats"}));
                 self.send(json!({"type": "messages", "chat": ""}));
             }
-            _ => {}
+            other => self.handle_more(other).await,
         }
     }
 }
 
 /// A protocol message as a row of ours; `None` for what is not shown
 /// (protocol housekeeping, reactions, keys).
-fn row(chat: &str, id: &str, sender: &str, from_me: bool, ts: i64, message: &wa::Message) -> Option<NewMessage> {
+pub(crate) fn row(chat: &str, id: &str, sender: &str, from_me: bool, ts: i64, message: &wa::Message) -> Option<NewMessage> {
     if id.is_empty() {
         return None;
     }
@@ -821,7 +800,7 @@ fn row(chat: &str, id: &str, sender: &str, from_me: bool, ts: i64, message: &wa:
 }
 
 /// Sets `sender`'s reaction on a message ("" is us); an empty emoji removes it.
-fn set_reaction(w: &crate::db::Writer, chat: &str, id: &str, sender: &str, emoji: &str) {
+pub(crate) fn set_reaction(w: &crate::db::Writer, chat: &str, id: &str, sender: &str, emoji: &str) {
     if emoji.is_empty() {
         w.exec("DELETE FROM reactions WHERE chat=?1 AND msg_id=?2 AND sender=?3", &[&chat, &id, &sender]);
     } else {
@@ -832,16 +811,16 @@ fn set_reaction(w: &crate::db::Writer, chat: &str, id: &str, sender: &str, emoji
     }
 }
 
-fn mark_deleted(w: &crate::db::Writer, chat: &str, id: &str) {
+pub(crate) fn mark_deleted(w: &crate::db::Writer, chat: &str, id: &str) {
     w.exec("UPDATE messages SET deleted=1, text='', thumb=NULL, raw=NULL, media_path='' WHERE chat=?1 AND id=?2", &[&chat, &id]);
 }
 
 /// A string safe to use as a file name.
-fn safe_name(text: &str) -> String {
+pub(crate) fn safe_name(text: &str) -> String {
     text.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' }).collect()
 }
 
-fn now() -> i64 {
+pub(crate) fn now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 

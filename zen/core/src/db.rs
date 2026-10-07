@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS reactions(
     PRIMARY KEY(chat, msg_id, sender)
 );
 CREATE TABLE IF NOT EXISTS names(jid TEXT PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS contacts(jid TEXT PRIMARY KEY, name TEXT NOT NULL);
 ";
 
 /// Columns added after the first schema; each fails harmlessly when present.
@@ -321,6 +322,16 @@ impl Db {
         conn.query_row(sql, args, map).optional().ok().flatten()
     }
 
+    /// The address-book contacts, for starting a new chat.
+    pub fn contacts(&self) -> Vec<serde_json::Value> {
+        let conn = self.conn.lock().unwrap();
+        let Ok(mut stmt) = conn.prepare("SELECT jid, name FROM contacts WHERE jid LIKE '%@s.whatsapp.net' AND name != '' ORDER BY name COLLATE NOCASE") else {
+            return Vec::new();
+        };
+        let rows = stmt.query_map([], |r| Ok(serde_json::json!({"jid": r.get::<_, String>(0)?, "name": r.get::<_, String>(1)?})));
+        rows.map(|rows| rows.flatten().collect()).unwrap_or_default()
+    }
+
     /// Every hidden id ("…@lid") the database still refers to.
     pub fn hidden_ids(&self) -> Vec<String> {
         let conn = self.conn.lock().unwrap();
@@ -377,7 +388,7 @@ fn name_of(conn: &Connection, jid: &str) -> String {
     }
     let stored: Option<String> = conn
         .query_row(
-            "SELECT COALESCE(NULLIF((SELECT name FROM chats WHERE jid=?1),''), (SELECT name FROM names WHERE jid=?1))",
+            "SELECT COALESCE(NULLIF((SELECT name FROM chats WHERE jid=?1),''), (SELECT name FROM contacts WHERE jid=?1), (SELECT name FROM names WHERE jid=?1))",
             [jid],
             |r| r.get(0),
         )
