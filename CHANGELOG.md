@@ -2,6 +2,11 @@
 
 The section for the running version is shown in the app after an update.
 
+## 1.0.6
+
+- After the device is removed from the phone's Linked Devices, the app shows a new pairing code instead of waiting for ever
+- The app is for Apple silicon again; the untested Intel half is gone and the download is half the size
+
 ## 1.0.5
 
 - The app is now a universal build: the same download runs on Intel Macs as well as Apple silicon (macOS 26 or later). The Intel half has not been run on an Intel Mac yet

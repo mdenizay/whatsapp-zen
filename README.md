@@ -47,7 +47,7 @@ unencrypted on disk; rely on FileVault for encryption at rest.
 
 ## Install
 
-Requires macOS 26 or later. One download runs on both Apple silicon and Intel Macs (the Intel half is built but has not been run on an Intel Mac yet; reports are welcome).
+Requires macOS 26 or later on Apple silicon.
 
 ```bash
 brew install --cask mdenizay/tap/whatsapp-zen
@@ -57,17 +57,6 @@ The app is signed and notarized, so it opens like any other.
 
 Then open the app and scan the QR code from WhatsApp on your phone
 (Settings → Linked Devices → Link a Device).
-
-### Linux and Windows (experimental)
-
-The same Rust core with a native window for each system: GTK 4 / libadwaita
-on Linux ([zen/gtk](zen/gtk)), WinUI 3 on Windows ([zen/windows](zen/windows)).
-They are first versions with the essentials (chats, messages, replies,
-reactions, photos, files, notifications) and have been tried far less than
-the macOS app. Downloads are on the
-[releases page](https://github.com/mdenizay/whatsapp-zen/releases) under
-"WhatsApp Zen for Linux" and "WhatsApp Zen for Windows"; problems and wishes
-are welcome in the issues.
 
 ## Build from source
 

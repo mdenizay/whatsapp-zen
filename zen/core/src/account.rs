@@ -159,7 +159,29 @@ impl Account {
         Ok(account)
     }
 
+    /// Keeps the account connected for as long as the app runs. The library
+    /// reconnects by itself after a network loss; its run loop only ends when
+    /// the phone has removed this device (or something went badly wrong).
     async fn run(self: Arc<Self>) -> Result<(), String> {
+        loop {
+            self.connect_once().await?;
+            *self.client.lock().unwrap() = None;
+            if self.status.lock().unwrap().state == "logged_out" {
+                // The link is gone for good: forget it, so that the next round
+                // starts a fresh pairing and shows a code instead of failing
+                // the same way for ever. Chats and messages are kept.
+                log::info!("account: this device was unlinked; starting a new pairing");
+                for name in ["session.db", "session.db-wal", "session.db-shm"] {
+                    let _ = std::fs::remove_file(self.dir.join(name));
+                }
+                self.set_state("connecting", "");
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+    }
+
+    /// One life of the connection: until the library gives up on it.
+    async fn connect_once(self: &Arc<Self>) -> Result<(), String> {
         let session = self.dir.join("session.db");
         let store = SqliteStore::new(&session.to_string_lossy()).await.map_err(|e| e.to_string())?;
         let on_qr = self.clone();
