@@ -763,7 +763,7 @@ struct ChatView: View {
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         if mediaOnly { panel.allowedContentTypes = [.image, .movie] }
-        if panel.runModal() == .OK { store.attach(panel.urls) }
+        if panel.runModal() == .OK { store.attach(panel.urls, asFiles: !mediaOnly) }
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {

@@ -93,6 +93,8 @@ final class AppStore: ObservableObject, Identifiable {
     @Published var drafts: [String: String] = [:]
     /// Further files queued behind the staged attachment, sent with it.
     @Published var pendingMore: [URL] = []
+    /// The queued files were picked as files: pictures among them go out as documents.
+    var pendingMoreAsFiles = false
     /// Members of the open group, for @-mentions.
     @Published var members: [GroupMember] = []
     /// Locked chats opened with Touch ID in this session.
@@ -426,29 +428,33 @@ final class AppStore: ObservableObject, Identifiable {
     /// Stages a file for the open chat: photos as photos, the rest as files.
     /// Stages several files: the first is shown in the composer, the rest
     /// are queued behind it and go out with the same press of Send.
-    func attach(_ urls: [URL]) {
+    ///
+    /// `asFiles` sends pictures as documents too: untouched, at full size,
+    /// under their own names. That is what picking "File" means.
+    func attach(_ urls: [URL], asFiles: Bool = false) {
         // Photos go to the send screen together; other files are staged in
         // the composer, the first shown and the rest queued behind it.
-        let photos = urls.filter(Attachments.isImage).compactMap { try? Data(contentsOf: $0) }.compactMap(Images.prepare)
+        let photos = asFiles ? [] : urls.filter(Attachments.isImage).compactMap { try? Data(contentsOf: $0) }.compactMap { Images.prepare($0) }
         if !photos.isEmpty { pendingPhotos = photos }
-        let files = urls.filter { !Attachments.isImage($0) }
+        let files = asFiles ? urls : urls.filter { !Attachments.isImage($0) }
         guard let first = files.first else { return }
         pendingMore = Array(files.dropFirst())
-        attach(first)
+        pendingMoreAsFiles = asFiles
+        attach(first, asFile: asFiles)
     }
 
     /// Sends one file straight away, with no caption.
     func sendNow(_ url: URL, to chat: String) async {
-        if Attachments.isImage(url), let data = try? Data(contentsOf: url), let image = Images.prepare(data) {
+        if !pendingMoreAsFiles, Attachments.isImage(url), let data = try? Data(contentsOf: url), let image = Images.prepare(data) {
             send(image: image, caption: "", to: chat)
         } else if let file = await Attachments.file(at: url) {
             send(file: file, caption: "", to: chat)
         }
     }
 
-    func attach(_ url: URL) {
+    func attach(_ url: URL, asFile: Bool = false) {
         Task { @MainActor in
-            if Attachments.isImage(url), let data = try? Data(contentsOf: url), let image = Images.prepare(data) {
+            if !asFile, Attachments.isImage(url), let data = try? Data(contentsOf: url), let image = Images.prepare(data) {
                 self.pendingPhotos = [image]
             } else if let file = await Attachments.file(at: url) {
                 self.pendingImage = nil

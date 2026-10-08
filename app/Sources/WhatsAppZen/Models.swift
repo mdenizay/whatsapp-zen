@@ -16,6 +16,9 @@ struct PendingImage: Identifiable {
     let width: Int
     let height: Int
     let preview: NSImage
+    /// The picture as it was picked, kept when it is larger than what is
+    /// normally sent, so that it can go out in HD instead.
+    var source: Data?
 }
 
 struct Chat: Decodable, Identifiable, Equatable {

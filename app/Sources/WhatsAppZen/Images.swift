@@ -137,17 +137,29 @@ enum Images {
         return CGImageDestinationFinalize(dest) ? out as Data : nil
     }
 
+    /// The long edge of a photo as normally sent, and of one sent in HD.
+    static let standardPixel: CGFloat = 1600
+    static let hdPixel: CGFloat = 4096
+
+    /// A picture's pixels at no more than `maxPixel` on its long edge.
+    static func pixels(of data: Data, maxPixel: CGFloat) -> CGImage? {
+        CGImageSourceCreateWithData(data as CFData, nil).flatMap { decode($0, maxPixel: maxPixel) }
+    }
+
     /// Converts arbitrary image data into what gets sent: a JPEG capped at
-    /// 1600px plus the small embedded thumbnail.
-    static func prepare(_ data: Data) -> PendingImage? {
+    /// 1600px (4096px in HD) plus the small embedded thumbnail.
+    static func prepare(_ data: Data, maxPixel: CGFloat = standardPixel) -> PendingImage? {
         guard let src = CGImageSourceCreateWithData(data as CFData, nil),
-              let full = decode(src, maxPixel: 1600),
+              let full = decode(src, maxPixel: maxPixel),
               let small = decode(src, maxPixel: 72),
               let preview = decode(src, maxPixel: 240),
               let body = jpeg(full, quality: 0.82),
               let thumb = jpeg(small, quality: 0.5) else { return nil }
+        // Worth keeping only when HD would really be larger.
+        let properties = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any]
+        let longEdge = max(properties?[kCGImagePropertyPixelWidth] as? CGFloat ?? 0, properties?[kCGImagePropertyPixelHeight] as? CGFloat ?? 0)
         return PendingImage(jpeg: body, thumb: thumb.base64EncodedString(), width: full.width, height: full.height,
-                            preview: image(preview))
+                            preview: image(preview), source: maxPixel == standardPixel && longEdge > standardPixel * 1.15 ? data : nil)
     }
 
     private static func isImage(_ url: URL) -> Bool {
@@ -157,7 +169,7 @@ enum Images {
     /// Images on the pasteboard: copied files first, then raw image data.
     static func fromPasteboard(_ pb: NSPasteboard = .general) -> [PendingImage] {
         let urls = (pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
-        let files = urls.filter(isImage).compactMap { try? Data(contentsOf: $0) }.compactMap(prepare)
+        let files = urls.filter(isImage).compactMap { try? Data(contentsOf: $0) }.compactMap { prepare($0) }
         if !files.isEmpty { return files }
         // Copied text often carries an image rendering too (e.g. from Office);
         // only treat the pasteboard as an image when there is no text.

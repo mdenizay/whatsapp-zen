@@ -2,6 +2,11 @@
 
 The section for the running version is shown in the app after an update.
 
+## 1.0.7
+
+- Photos can be sent in HD: an HD button on the photo screen sends them at up to 4096 pixels instead of 1600 (cropping, rotating and drawing still apply); the choice is remembered
+- Picking "File" sends pictures as files, untouched and under their own names, instead of turning them into photos
+
 ## 1.0.6
 
 - After the device is removed from the phone's Linked Devices, the app shows a new pairing code instead of waiting for ever

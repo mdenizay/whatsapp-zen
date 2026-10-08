@@ -19,22 +19,38 @@ final class EditablePhoto: ObservableObject, Identifiable {
     @Published var image: CGImage
     @Published var marks: [Mark] = []
     private let original: CGImage
+    /// The picture as picked, when it is large enough to be sent in HD.
+    private let source: Data?
+    /// What was done to the picture, in order, so that the same can be done
+    /// to the full-size one when it goes out in HD.
+    private var steps: [Step] = []
+
+    private enum Step {
+        case marks([Mark])
+        case rotate
+        case crop(CGRect)
+    }
 
     init?(_ pending: PendingImage) {
         guard let cg = NSBitmapImageRep(data: pending.jpeg)?.cgImage else { return nil }
         image = cg
         original = cg
+        source = pending.source
     }
 
     var size: CGSize { CGSize(width: image.width, height: image.height) }
+    var canSendHD: Bool { source != nil }
 
     func reset() {
         image = original
         marks = []
+        steps = []
     }
 
     /// The picture with its marks drawn in.
-    func flattened() -> CGImage {
+    func flattened() -> CGImage { Self.drawing(marks, on: image) }
+
+    private static func drawing(_ marks: [Mark], on image: CGImage) -> CGImage {
         guard !marks.isEmpty,
               let ctx = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
                                   space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return image }
@@ -56,6 +72,8 @@ final class EditablePhoto: ObservableObject, Identifiable {
 
     /// Makes the marks part of the picture, before a crop or rotation.
     func bake() {
+        guard !marks.isEmpty else { return }
+        steps.append(.marks(marks))
         image = flattened()
         marks = []
     }
@@ -83,27 +101,52 @@ final class EditablePhoto: ObservableObject, Identifiable {
         return path
     }
 
-    func rotate() {
-        bake()
+    private static func rotated(_ image: CGImage) -> CGImage {
         guard let ctx = CGContext(data: nil, width: image.height, height: image.width, bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return }
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return image }
         ctx.translateBy(x: 0, y: CGFloat(image.width))
         ctx.rotate(by: -.pi / 2)
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
-        if let turned = ctx.makeImage() { image = turned }
+        return ctx.makeImage() ?? image
+    }
+
+    private static func cropped(_ image: CGImage, to unit: CGRect) -> CGImage {
+        let rect = CGRect(x: unit.minX * CGFloat(image.width), y: unit.minY * CGFloat(image.height),
+                          width: unit.width * CGFloat(image.width), height: unit.height * CGFloat(image.height)).integral
+        return image.cropping(to: rect) ?? image
+    }
+
+    func rotate() {
+        bake()
+        steps.append(.rotate)
+        image = Self.rotated(image)
     }
 
     func crop(to unit: CGRect) {
         bake()
-        let rect = CGRect(x: unit.minX * CGFloat(image.width), y: unit.minY * CGFloat(image.height),
-                          width: unit.width * CGFloat(image.width), height: unit.height * CGFloat(image.height)).integral
-        if let cut = image.cropping(to: rect) { image = cut }
+        steps.append(.crop(unit))
+        image = Self.cropped(image, to: unit)
     }
 
-    /// The finished photo, ready to send.
-    func export() -> PendingImage? {
-        guard let data = NSBitmapImageRep(cgImage: flattened()).representation(using: .jpeg, properties: [.compressionFactor: 0.9]) else { return nil }
-        return Images.prepare(data)
+    /// The finished photo, ready to send. In HD the same edits are made
+    /// again on the full-size picture; marks and crops are kept as fractions
+    /// of the picture, so they land in the same places.
+    func export(hd: Bool = false) -> PendingImage? {
+        var picture = flattened()
+        var limit = Images.standardPixel
+        if hd, let source, var large = Images.pixels(of: source, maxPixel: Images.hdPixel) {
+            for step in steps {
+                switch step {
+                case .marks(let marks): large = Self.drawing(marks, on: large)
+                case .rotate: large = Self.rotated(large)
+                case .crop(let unit): large = Self.cropped(large, to: unit)
+                }
+            }
+            picture = Self.drawing(marks, on: large)
+            limit = Images.hdPixel
+        }
+        guard let data = NSBitmapImageRep(cgImage: picture).representation(using: .jpeg, properties: [.compressionFactor: 0.92]) else { return nil }
+        return Images.prepare(data, maxPixel: limit)
     }
 }
 
@@ -124,6 +167,8 @@ struct PhotoSendSheet: View {
     @State private var crop = CGRect(x: 0, y: 0, width: 1, height: 1)
     @State private var dragStart: CGRect?
     @FocusState private var captionFocused: Bool
+    /// Send at up to 4096 pixels instead of 1600; remembered.
+    @AppStorage("sendPhotosHD") private var hd = false
 
     private static let area = CGSize(width: 660, height: 440)
     private static let colors: [NSColor] = [.systemRed, .systemYellow, .systemGreen, .systemBlue, .white, .black]
@@ -145,6 +190,12 @@ struct PhotoSendSheet: View {
                     .textFieldStyle(.roundedBorder)
                     .focused($captionFocused)
                     .onSubmit(send)
+                if photos.contains(where: \.canSendHD) {
+                    Toggle(isOn: $hd) { Text("HD").fontWeight(.semibold) }
+                        .toggleStyle(.button)
+                        .tint(Theme.accent)
+                        .help(hd ? L("Sending in HD: larger and sharper") : L("Send in HD"))
+                }
                 Button(L("Cancel")) { store.pendingPhotos = [] }.keyboardShortcut(.cancelAction)
                 Button(photos.count > 1 ? L("Send %lld", photos.count) : L("Send"), action: send)
                     .buttonStyle(.glassProminent)
@@ -276,7 +327,7 @@ struct PhotoSendSheet: View {
     private func send() {
         let reply = store.replyTo?.id
         for (position, photo) in photos.enumerated() {
-            guard let image = photo.export() else { continue }
+            guard let image = photo.export(hd: hd) else { continue }
             store.send(image: image, caption: position == 0 ? caption : "", to: chat.jid, replyTo: position == 0 ? reply : nil)
         }
         store.replyTo = nil
