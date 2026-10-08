@@ -124,6 +124,138 @@ impl Account {
             "delete_for_me" => self.delete_for_me(&r.chat, &r.id),
             "fetch_history" => self.fetch_history(&r.chat),
             "group_info" => self.group_info(&r.chat),
+            "message_info" => {
+                let me = self.me();
+                let people: Vec<Value> = self
+                    .db
+                    .receipts(&r.chat, &r.id)
+                    .into_iter()
+                    .filter(|(jid, _, _)| *jid != me)
+                    .map(|(jid, kind, ts)| json!({"jid": jid, "name": self.db.name_of(&jid), "read": kind >= status::READ, "ts": ts}))
+                    .collect();
+                Ok(json!(people))
+            }
+            "group_describe" => {
+                use whatsapp_rust::PreviousDescription;
+                use whatsapp_rust::GroupDescription;
+                let client = self.client()?;
+                let text = r.text.trim();
+                let description = if text.is_empty() { None } else { Some(GroupDescription::new(text).map_err(|_| "That description is too long".to_string())?) };
+                self.rt.block_on(client.groups().set_description(jid(&r.chat)?, description, PreviousDescription::Resolve)).map_err(|e| e.to_string())?;
+                Ok(Value::Null)
+            }
+            "group_create" => {
+                use whatsapp_rust::{GroupCreateOptions, GroupParticipantOptions};
+                let client = self.client()?;
+                let name = r.text.trim();
+                if name.is_empty() {
+                    return Err("The group needs a name".into());
+                }
+                let participants = r.mentions.iter().filter_map(|m| jid(m).ok()).map(|who| GroupParticipantOptions::builder().jid(who).finish()).collect();
+                let options = GroupCreateOptions::builder().subject(name).participants(participants).build();
+                let created = self.rt.block_on(client.groups().create_group(options)).map_err(|e| e.to_string())?;
+                let chat = created.metadata.id.to_non_ad().to_string();
+                self.db.write(|w| {
+                    w.touch_chat(&chat, now());
+                    w.exec("UPDATE chats SET name=?2 WHERE jid=?1", &[&chat, &created.metadata.subject]);
+                });
+                self.send(json!({"type": "chats"}));
+                Ok(json!({"jid": chat}))
+            }
+            "group_photo" => {
+                let client = self.client()?;
+                let group = jid(&r.chat)?;
+                let picture = if r.path.is_empty() {
+                    Vec::new()
+                } else {
+                    let data = std::fs::read(&r.path).map_err(|e| e.to_string())?;
+                    crate::media::square_jpeg(&data, 640).ok_or("That picture could not be read")?
+                };
+                self.rt.block_on(client.groups().set_profile_picture(group, picture)).map_err(|e| e.to_string())?;
+                self.forget_avatar(&r.chat);
+                Ok(Value::Null)
+            }
+            "mark_unread" => {
+                let client = self.client()?;
+                self.db.write(|w| w.exec("UPDATE chats SET unread=MAX(unread, 1) WHERE jid=?1", &[&r.chat]));
+                self.send(json!({"type": "chats"}));
+                let chat = jid(&r.chat)?;
+                self.rt.spawn(async move {
+                    let _ = client.chat_actions().mark_chat_as_read(&chat, false, None).await;
+                });
+                Ok(Value::Null)
+            }
+            "clear_chat" | "delete_chat" => {
+                let client = self.client()?;
+                let delete = r.cmd == "delete_chat";
+                let chat = jid(&r.chat)?;
+                let media: Vec<String> = self.db.query("chat=?1 AND media_path!=''", &[&r.chat]).into_iter().map(|m| m.media_path).collect();
+                for path in media {
+                    self.remove_media_file(&path);
+                }
+                self.db.write(|w| {
+                    w.exec("DELETE FROM messages WHERE chat=?1", &[&r.chat]);
+                    w.exec("DELETE FROM reactions WHERE chat=?1", &[&r.chat]);
+                    w.exec("DELETE FROM receipts WHERE chat=?1", &[&r.chat]);
+                    w.exec("DELETE FROM poll_votes WHERE chat=?1", &[&r.chat]);
+                    if delete {
+                        w.exec("DELETE FROM chats WHERE jid=?1", &[&r.chat]);
+                    } else {
+                        w.exec("UPDATE chats SET unread=0 WHERE jid=?1", &[&r.chat]);
+                    }
+                });
+                self.send(json!({"type": "chats"}));
+                self.send(json!({"type": "messages", "chat": r.chat}));
+                self.rt.spawn(async move {
+                    let actions = client.chat_actions();
+                    let _ = if delete { actions.delete_chat(&chat, true, None).await } else { actions.clear_chat(&chat, false, true, None).await };
+                });
+                Ok(Value::Null)
+            }
+            "profile" => {
+                let client = self.client()?;
+                let me = self.me();
+                let about = if me.is_empty() {
+                    String::new()
+                } else {
+                    jid(&me)
+                        .ok()
+                        .and_then(|who| self.rt.block_on(client.contacts().get_user_info(&[who])).ok())
+                        .and_then(|all| all.into_values().next())
+                        .and_then(|info| info.status)
+                        .unwrap_or_default()
+                };
+                Ok(json!({"name": client.push_name(), "about": about, "me": me}))
+            }
+            "set_name" => {
+                let client = self.client()?;
+                let name = r.text.trim();
+                if name.is_empty() {
+                    return Err("The name cannot be empty".into());
+                }
+                self.rt.block_on(client.profile().set_push_name(name)).map_err(|e| e.to_string())?;
+                Ok(Value::Null)
+            }
+            "set_about" => {
+                let client = self.client()?;
+                self.rt.block_on(client.profile().set_status_text(r.text.trim())).map_err(|e| e.to_string())?;
+                Ok(Value::Null)
+            }
+            "set_photo" => {
+                let client = self.client()?;
+                if r.path.is_empty() {
+                    self.rt.block_on(client.profile().remove_profile_picture()).map_err(|e| e.to_string())?;
+                } else {
+                    let data = std::fs::read(&r.path).map_err(|e| e.to_string())?;
+                    let picture = crate::media::square_jpeg(&data, 640).ok_or("That picture could not be read")?;
+                    self.rt.block_on(client.profile().set_profile_picture(picture)).map_err(|e| e.to_string())?;
+                }
+                let me = self.me();
+                if !me.is_empty() {
+                    self.forget_avatar(&me);
+                }
+                Ok(Value::Null)
+            }
             "group_update" => self.group_update(&r.chat, &r.jid, &r.action),
             "group_rename" => {
                 let client = self.client()?;
@@ -269,6 +401,14 @@ impl Account {
             }
             other => Err(format!("\"{other}\" is not available in the Rust core yet")),
         }
+    }
+
+    /// Drops the cached profile photo of a chat, so that it is fetched again.
+    pub(crate) fn forget_avatar(&self, jid: &str) {
+        let file = self.dir.join("avatars").join(format!("{}.jpg", safe_name(jid)));
+        let _ = std::fs::remove_file(&file);
+        let _ = std::fs::remove_file(file.with_extension("none"));
+        self.send(json!({"type": "avatar", "jid": jid}));
     }
 
     fn remove_media_file(&self, path: &str) {
@@ -549,9 +689,11 @@ impl Account {
         self.db.write(|w| w.exec("UPDATE chats SET name=?2 WHERE jid=?1", &[&chat, &info.subject]));
         Ok(json!({
             "name": info.subject,
-            "topic": "",
+            "topic": info.description.clone().unwrap_or_default(),
             "created": info.creation_time.unwrap_or(0),
             "is_admin": i_am_admin,
+            "locked": info.is_locked,
+            "announce": info.is_announcement,
             "members": members.iter().map(|(name, id, admin, is_me)| json!({"jid": id, "name": name, "is_admin": admin, "is_me": is_me})).collect::<Vec<_>>(),
         }))
     }
@@ -1069,8 +1211,53 @@ impl Account {
                 }
             }
             Event::GroupUpdate(update) => {
-                // Something about a group changed (its name, its members): read its name again.
+                use whatsapp_rust::wacore::stanza::groups::GroupNotificationAction as Action;
                 let chat = update.group_jid.to_non_ad().to_string();
+                let me = self.me();
+                // Who did it, by name; "You" when it was the user.
+                let actor = match update.participant_pn.as_ref().or(update.participant.as_ref()) {
+                    Some(who) => {
+                        let id = self.pn(who).await;
+                        if id == me { crate::i18n::t("You") } else { self.db.name_of(&id) }
+                    }
+                    None => String::new(),
+                };
+                let mut names = Vec::new();
+                if let Action::Add { participants, .. } | Action::Remove { participants, .. } | Action::Promote { participants } | Action::Demote { participants } = &update.action {
+                    for p in participants {
+                        let id = match &p.phone_number {
+                            Some(pn) => pn.to_non_ad().to_string(),
+                            None => self.pn(&p.jid).await,
+                        };
+                        names.push(if id == me { crate::i18n::t("You") } else { self.db.name_of(&id) });
+                    }
+                }
+                let who = names.join(", ");
+                let alone = actor.is_empty() || (names.len() == 1 && who == actor);
+                let line = match &update.action {
+                    Action::Add { .. } if alone => crate::i18n::t("%1 joined").replace("%1", &who),
+                    Action::Add { .. } => crate::i18n::t("%1 added %2").replace("%1", &actor).replace("%2", &who),
+                    Action::Remove { .. } if alone => crate::i18n::t("%1 left").replace("%1", &who),
+                    Action::Remove { .. } => crate::i18n::t("%1 removed %2").replace("%1", &actor).replace("%2", &who),
+                    Action::Promote { .. } => crate::i18n::t("%1 is now an admin").replace("%1", &who),
+                    Action::Demote { .. } => crate::i18n::t("%1 is no longer an admin").replace("%1", &who),
+                    Action::Subject { subject, .. } => crate::i18n::t("%1 changed the group name to “%2”").replace("%1", &actor).replace("%2", subject),
+                    Action::Description { .. } => crate::i18n::t("%1 changed the group description").replace("%1", &actor),
+                    Action::Locked { .. } | Action::Unlocked | Action::Announce | Action::NotAnnounce => crate::i18n::t("%1 changed the group settings").replace("%1", &actor),
+                    _ => String::new(),
+                };
+                let at = update.timestamp.timestamp();
+                if !line.is_empty() {
+                    // Shown in the chat as a line of its own, like on the phone.
+                    let id = format!("sys-{}-{}", update.notification_id.clone().unwrap_or_else(|| at.to_string()), update.action_index);
+                    let row = NewMessage { chat: chat.clone(), id, ts: at, kind: "system".into(), text: line, status: status::READ, ..Default::default() };
+                    self.db.write(|w| {
+                        w.insert_message(&row);
+                        w.touch_chat(&chat, at);
+                    });
+                    self.send(json!({"type": "messages", "chat": chat}));
+                }
+                // The name (and the member list the app may show) may have changed.
                 if let Ok(client) = self.client() {
                     if let Ok(group) = client.groups().get_metadata(&update.group_jid).await {
                         if !group.subject.is_empty() {
@@ -1078,10 +1265,10 @@ impl Account {
                                 w.touch_chat(&chat, 0);
                                 w.exec("UPDATE chats SET name=?2 WHERE jid=?1", &[&chat, &group.subject])
                             });
-                            self.send(json!({"type": "chats"}));
                         }
                     }
                 }
+                self.send(json!({"type": "chats"}));
             }
             Event::MarkChatAsReadUpdate(update) => {
                 let chat = self.pn(&update.jid).await;

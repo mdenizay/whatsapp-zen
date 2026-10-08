@@ -331,6 +331,11 @@ private struct AccountSettings: View {
 
     var body: some View {
         Form {
+            if let active = model.active, active.state == "connected" {
+                Section(L("Profile")) {
+                    ProfileEditor(store: active)
+                }
+            }
             Section {
                 ForEach(model.accounts) { account in
                     HStack(spacing: 10) {
@@ -360,6 +365,68 @@ private struct AccountSettings: View {
             }
         } message: {
             Text(L("The chat history on this Mac will be deleted. Messages on your phone are not affected."))
+        }
+    }
+}
+
+/// Your name, "about" line and photo as other people see them.
+private struct ProfileEditor: View {
+    @ObservedObject var store: AppStore
+    @State private var profile: Profile?
+    @State private var name = ""
+    @State private var about = ""
+    @State private var busy = false
+    @State private var error: String?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Menu {
+                Button(L("Change Photo…"), systemImage: "photo") { changePhoto() }
+                Button(L("Remove Photo"), systemImage: "trash", role: .destructive) { save { try await store.setProfilePhoto(path: nil) } }
+            } label: {
+                AvatarView(jid: profile?.me ?? store.me, name: name, size: 56, tick: store.avatarTick)
+            }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .help(L("Change Photo…"))
+            VStack(alignment: .leading, spacing: 8) {
+                TextField(L("Name"), text: $name)
+                    .onSubmit { if name != profile?.name { save { try await store.setProfileName(name) } } }
+                TextField(L("About"), text: $about)
+                    .onSubmit { if about != profile?.about { save { try await store.setProfileAbout(about) } } }
+                HStack {
+                    Text(L("Press ↩ to save a change.")).font(.caption).foregroundStyle(.tertiary)
+                    if busy { ProgressView().controlSize(.mini) }
+                    if let error { Text(error).font(.caption).foregroundStyle(.red) }
+                }
+            }
+        }
+        .task {
+            profile = await store.profile()
+            name = profile?.name ?? ""
+            about = profile?.about ?? ""
+        }
+    }
+
+    private func save(_ work: @escaping () async throws -> Void) {
+        busy = true
+        error = nil
+        Task { @MainActor in
+            do {
+                try await work()
+                profile = await store.profile()
+            } catch {
+                self.error = L(error.localizedDescription)
+            }
+            busy = false
+        }
+    }
+
+    private func changePhoto() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url {
+            save { try await store.setProfilePhoto(path: url.path) }
         }
     }
 }

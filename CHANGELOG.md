@@ -2,6 +2,18 @@
 
 The section for the running version is shown in the app after an update.
 
+## 1.1.0
+
+- Mentions: "@Name" is shown in colour in messages and opens that person's chat on click; while typing, ↑↓ pick a suggestion and ⇥ or ↩ insert it, and the suggestions show the number too; the chat list marks chats where you were mentioned with an @ badge
+- Message Info: for your own messages, who received and who read them, with the times (right-click → Message Info; collected from this version on)
+- Group events appear in the chat: who was added, removed, joined, left, became an admin, and name or description changes
+- Groups: create a group (New Chat → New Group…), see and edit the description, change or remove the group photo (admins)
+- Your profile: name, about line and photo can be changed in Settings → Accounts
+- Chats: Mark as Unread, Clear Messages and Delete Chat in the chat's right-click menu, in step with the phone
+- Selecting messages: Forward and Star act on all the selected messages; forwarding several at once
+- Reactions: right-click a reaction to see who reacted
+- The message field checks spelling as you type, with the system's autocorrect setting
+
 ## 1.0.7
 
 - Photos can be sent in HD: an HD button on the photo screen sends them at up to 4096 pixels instead of 1600 (cropping, rotating and drawing still apply); the choice is remembered

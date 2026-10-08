@@ -17,6 +17,15 @@ pub fn t(key: &str) -> String {
     let table: &[(&str, &str)] = match lang.as_str() {
         "tr" => &[
             ("View-once message. Open it on your phone.", "Tek gösterimlik mesaj. Telefonundan aç."),
+            ("%1 added %2", "%1, %2 kişisini ekledi"),
+            ("%1 removed %2", "%1, %2 kişisini çıkardı"),
+            ("%1 joined", "%1 katıldı"),
+            ("%1 left", "%1 ayrıldı"),
+            ("%1 is now an admin", "%1 artık yönetici"),
+            ("%1 is no longer an admin", "%1 artık yönetici değil"),
+            ("%1 changed the group name to “%2”", "%1 grup adını “%2” yaptı"),
+            ("%1 changed the group description", "%1 grup açıklamasını değiştirdi"),
+            ("%1 changed the group settings", "%1 grup ayarlarını değiştirdi"),
             ("You", "Sen"),
             ("Group", "Grup"),
             ("Photo", "Fotoğraf"),

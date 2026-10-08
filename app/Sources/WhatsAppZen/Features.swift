@@ -8,7 +8,7 @@ import SwiftUI
 struct ForwardSheet: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) private var dismiss
-    let message: Message
+    let messages: [Message]
 
     @State private var query = ""
     @State private var chosen = Set<String>()
@@ -20,11 +20,11 @@ struct ForwardSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text(L("Forward Message")).font(.headline)
+                Text(messages.count > 1 ? L("Forward %lld Messages", messages.count) : L("Forward Message")).font(.headline)
                 Spacer()
                 Button(L("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(L("Send")) {
-                    store.forward(message, to: Array(chosen))
+                    store.forward(messages, to: Array(chosen))
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -49,6 +49,87 @@ struct ForwardSheet: View {
             }
         }
         .frame(width: 400, height: 500)
+    }
+}
+
+/// Makes a group: a name and the people in it.
+struct GroupCreateView: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    let contacts: [Contact]
+    /// Called after the group is made and opened.
+    var done: () -> Void = {}
+
+    @State private var name = ""
+    @State private var query = ""
+    @State private var chosen = Set<String>()
+    @State private var busy = false
+    @State private var error: String?
+
+    private var matches: [Contact] {
+        query.isEmpty ? contacts : contacts.filter { $0.name.localizedCaseInsensitiveContains(query) }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(L("New Group")).font(.headline)
+                Spacer()
+                if busy { ProgressView().controlSize(.small) }
+                Button(L("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(L("Create")) { create() }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent).tint(Theme.accent)
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || chosen.isEmpty)
+            }
+            .padding(14)
+            TextField(L("Group name"), text: $name).textFieldStyle(.roundedBorder).padding(.horizontal, 14)
+            TextField(L("Search contacts"), text: $query).textFieldStyle(.roundedBorder).padding(.horizontal, 14).padding(.vertical, 8)
+            if let error {
+                Text(error).font(.callout).foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.bottom, 6)
+            }
+            if !chosen.isEmpty {
+                Text(L("%lld members", chosen.count)).font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.bottom, 4)
+            }
+            List(matches) { contact in
+                Button {
+                    if !chosen.insert(contact.jid).inserted { chosen.remove(contact.jid) }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: chosen.contains(contact.jid) ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(chosen.contains(contact.jid) ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.tertiary))
+                        AvatarView(jid: contact.jid, name: contact.name, size: 30)
+                        Text(contact.name).lineLimit(1)
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(width: 400, height: 520)
+        .disabled(busy)
+    }
+
+    private func create() {
+        busy = true
+        error = nil
+        Task { @MainActor in
+            do {
+                let jid = try await store.createGroup(name: name.trimmingCharacters(in: .whitespaces), members: Array(chosen))
+                busy = false
+                dismiss()
+                done()
+                if !jid.isEmpty {
+                    // The list learns of the group a moment later.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { store.openChecked(jid) }
+                }
+            } catch {
+                busy = false
+                self.error = L(error.localizedDescription)
+            }
+        }
     }
 }
 
@@ -148,11 +229,26 @@ struct GroupInfoSheet: View {
     @State private var adding = false
     @State private var confirmLeave = false
     @State private var copied = false
+    @State private var topic = ""
+    @State private var editingTopic = false
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                AvatarView(jid: chat.jid, name: chat.name, size: 48, tick: store.avatarTick)
+                if info?.isAdmin == true {
+                    Menu {
+                        Button(L("Change Photo…"), systemImage: "photo") { changePhoto() }
+                        Button(L("Remove Photo"), systemImage: "trash", role: .destructive) {
+                            run { try await store.groupPhoto(chat.jid, path: nil) }
+                        }
+                    } label: {
+                        AvatarView(jid: chat.jid, name: chat.name, size: 48, tick: store.avatarTick)
+                    }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .help(L("Change Photo…"))
+                } else {
+                    AvatarView(jid: chat.jid, name: chat.name, size: 48, tick: store.avatarTick)
+                }
                 VStack(alignment: .leading, spacing: 3) {
                     if info?.isAdmin == true {
                         TextField(L("Group name"), text: $name)
@@ -171,10 +267,38 @@ struct GroupInfoSheet: View {
             }
             .padding(14)
 
-            if let topic = info?.topic, !topic.isEmpty {
-                Text(topic).font(.callout).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14).padding(.bottom, 8)
+            if editingTopic {
+                VStack(alignment: .trailing, spacing: 6) {
+                    TextField(L("Group description"), text: $topic, axis: .vertical).lineLimit(2...6).textFieldStyle(.roundedBorder)
+                    HStack {
+                        Button(L("Cancel")) { editingTopic = false }
+                        Button(L("Save")) {
+                            run {
+                                try await store.groupDescribe(chat.jid, text: topic)
+                                editingTopic = false
+                                await load()
+                            }
+                        }
+                        .buttonStyle(.borderedProminent).tint(Theme.accent)
+                    }
+                }
+                .padding(.horizontal, 14).padding(.bottom, 8)
+            } else if let info {
+                HStack(alignment: .top, spacing: 6) {
+                    Text(info.topic.isEmpty ? L("No description") : info.topic)
+                        .font(.callout).foregroundStyle(info.topic.isEmpty ? .tertiary : .secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if info.isAdmin {
+                        Button(L("Edit"), systemImage: "pencil") {
+                            topic = info.topic
+                            editingTopic = true
+                        }
+                        .labelStyle(.iconOnly).buttonStyle(.borderless)
+                        .help(L("Edit description"))
+                    }
+                }
+                .padding(.horizontal, 14).padding(.bottom, 8)
             }
             if let error {
                 Text(error).font(.callout).foregroundStyle(.red)
@@ -248,6 +372,15 @@ struct GroupInfoSheet: View {
                     dismiss()
                 }
             }
+        }
+    }
+
+    private func changePhoto() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url {
+            run { try await store.groupPhoto(chat.jid, path: url.path) }
         }
     }
 

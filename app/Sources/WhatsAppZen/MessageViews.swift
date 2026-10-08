@@ -25,6 +25,7 @@ extension MessageRow: Equatable {
     static func == (a: MessageRow, b: MessageRow) -> Bool {
         a.message == b.message && a.showSender == b.showSender && a.endsGroup == b.endsGroup
             && a.highlighted == b.highlighted && a.maxWidth == b.maxWidth && a.selected == b.selected
+            && a.mentions.count == b.mentions.count
     }
 }
 
@@ -39,10 +40,13 @@ struct MessageRow: View {
     /// Whether this message is picked, while several are being selected; nil otherwise.
     var selected: Bool?
     var maxWidth: CGFloat = 520
+    /// Names that may follow an "@" in the text, and whose chat each opens.
+    var mentions: [String: String] = [:]
     let actions: MessageActions
 
     @ObservedObject private var prefs = Prefs.shared
     @State private var hovering = false
+    @State private var showingInfo = false
     /// How far a two-finger swipe has pulled this message aside.
     @State private var swipe: CGFloat = 0
     @State private var picking = false
@@ -130,6 +134,15 @@ struct MessageRow: View {
             }
         }
         .contextMenu { menu }
+        .popover(isPresented: $showingInfo, arrowEdge: .leading) { MessageInfoView(store: store, message: message) }
+        // A click on an "@Name" opens that person's chat.
+        .environment(\.openURL, OpenURLAction { url in
+            guard url.scheme == MessageFormat.mentionScheme else { return .systemAction }
+            if let jid = url.absoluteString.dropFirst(MessageFormat.mentionScheme.count + 1).removingPercentEncoding, !jid.isEmpty {
+                store.openChecked(jid)
+            }
+            return .handled
+        })
         .confirmationDialog(L("Delete this message?"), isPresented: $confirmDelete) {
             if canDeleteForEveryone {
                 Button(L("Delete for Everyone"), role: .destructive) { store.revoke(message) }
@@ -233,7 +246,7 @@ struct MessageRow: View {
             meta.frame(maxWidth: .infinity, alignment: .trailing)
         } else if !message.text.isEmpty {
             HStack(alignment: .lastTextBaseline, spacing: 8) {
-                Text(MessageFormat.attributed(message.text)).font(.system(size: prefs.fontSize, design: prefs.design)).textSelection(.enabled)
+                Text(MessageFormat.attributed(message.text, mentions: mentions, mentionColor: mine ? .white : Theme.accent)).font(.system(size: prefs.fontSize, design: prefs.design)).textSelection(.enabled)
                 meta
             }
         } else if !bare {
@@ -296,6 +309,12 @@ struct MessageRow: View {
                 }
                 .buttonStyle(.plain)
                 .help(list.map(\.name).joined(separator: ", "))
+                .contextMenu {
+                    // Who reacted; a plain list, nothing to pick.
+                    ForEach(Array(list.enumerated()), id: \.offset) { _, reaction in
+                        Button(reaction.fromMe ? L("You") : reaction.name) {}.disabled(true)
+                    }
+                }
             }
         }
     }
@@ -326,6 +345,9 @@ struct MessageRow: View {
             }
             if let select = actions.select {
                 Button(L("Select Messages"), systemImage: "checkmark.circle") { select(message) }
+            }
+            if mine, message.status >= Status.sent {
+                Button(L("Message Info"), systemImage: "info.circle") { showingInfo = true }
             }
             Menu(L("React"), systemImage: "face.smiling") {
                 ForEach(quickReactions, id: \.self) { emoji in
@@ -772,6 +794,68 @@ struct BubbleStack: Layout {
 }
 
 /// Lays out a conversation: day dividers, sender runs and bubble tails.
+/// Who has received and read a message of yours, with the times.
+struct MessageInfoView: View {
+    let store: AppStore
+    let message: Message
+    @State private var people: [ReceiptInfo] = []
+    @State private var loaded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L("Message Info")).font(.headline)
+            let read = people.filter(\.read)
+            let delivered = people.filter { !$0.read }
+            if loaded, people.isEmpty {
+                Text(message.status >= Status.read ? L("Read") : message.status >= Status.delivered ? L("Delivered") : L("Sent"))
+                    .foregroundStyle(.secondary)
+                Text(L("Who received it is not known for messages sent before this version."))
+                    .font(.caption).foregroundStyle(.tertiary).frame(maxWidth: 240, alignment: .leading)
+            }
+            if !read.isEmpty { section(L("Read by"), read, "checkmark.circle.fill", Theme.readTick) }
+            if !delivered.isEmpty { section(L("Delivered to"), delivered, "checkmark.circle", .secondary) }
+            if !loaded { ProgressView().controlSize(.small) }
+        }
+        .padding(14)
+        .frame(minWidth: 220)
+        .task {
+            people = await store.messageInfo(message)
+            loaded = true
+        }
+    }
+
+    private func section(_ title: String, _ list: [ReceiptInfo], _ icon: String, _ color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label(title, systemImage: icon).font(.caption.weight(.semibold)).foregroundStyle(color)
+            ForEach(list) { person in
+                HStack(spacing: 8) {
+                    AvatarView(jid: person.jid, name: person.name, size: 20)
+                    Text(person.name).lineLimit(1)
+                    Spacer(minLength: 12)
+                    Text(Format.listStamp(person.ts) + " " + Format.time(Date(timeIntervalSince1970: TimeInterval(person.ts))))
+                        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                }
+            }
+        }
+    }
+}
+
+/// A line about the chat itself ("Ali added Veli"), not a bubble.
+struct SystemNote: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 10).padding(.vertical, 4)
+            .background(.primary.opacity(0.06), in: Capsule())
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 3)
+    }
+}
+
 struct MessageList: View {
     @EnvironmentObject var store: AppStore
     let messages: [Message]
@@ -784,7 +868,15 @@ struct MessageList: View {
     var maxWidth: CGFloat = 520
     let actions: MessageActions
 
+    /// The names a mention in this chat may use: the members, and yourself.
+    private var mentions: [String: String] {
+        var names = Dictionary(store.members.map { ($0.name, $0.jid) }, uniquingKeysWith: { a, _ in a })
+        names[L("You")] = ""
+        return names
+    }
+
     var body: some View {
+        let mentions = isGroup ? mentions : [L("You"): ""]
         ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
             let previous = index > 0 ? messages[index - 1] : nil
             let next = index + 1 < messages.count ? messages[index + 1] : nil
@@ -799,6 +891,9 @@ struct MessageList: View {
                 }
                 .padding(.vertical, 6)
             }
+            if message.type == "system" {
+                SystemNote(text: message.text).id(message.id)
+            } else {
             MessageRow(
                 store: store,
                 message: message,
@@ -807,10 +902,12 @@ struct MessageList: View {
                 highlighted: highlighted == message.id,
                 selected: selection.map { $0.contains(message.id) },
                 maxWidth: maxWidth,
+                mentions: mentions,
                 actions: actions
             )
             .equatable()
             .id(message.id)
+            }
         }
     }
 }

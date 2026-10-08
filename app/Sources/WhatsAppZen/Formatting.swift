@@ -20,10 +20,38 @@ enum MessageFormat {
         return out
     }
 
-    static func attributed(_ raw: String) -> AttributedString {
+    /// The scheme of the links put on "@Name" mentions; the row that shows
+    /// the text opens that person's chat for them.
+    static let mentionScheme = "zen-mention"
+
+    /// `mentions` maps the names that may appear after "@" to the ids of the
+    /// people; an empty id (yourself) is marked but not linked.
+    static func attributed(_ raw: String, mentions: [String: String] = [:], mentionColor: Color = Theme.accent) -> AttributedString {
         let text = normalized(raw)
         let chars = Array(text)
         var links: [(range: Range<Int>, url: URL)] = []
+        if !mentions.isEmpty {
+            // Longest names first, so "@Ali Veli" is not taken for "@Ali".
+            let names = mentions.keys.sorted { $0.count > $1.count }
+            var i = 0
+            while i < chars.count {
+                if chars[i] == "@", i == 0 || !chars[i - 1].isLetter {
+                    if let name = names.first(where: { name in
+                        let end = i + 1 + name.count
+                        return end <= chars.count && String(chars[(i + 1)..<end]) == name && (end == chars.count || !chars[end].isLetter)
+                    }) {
+                        let end = i + 1 + name.count
+                        let target = mentions[name] ?? ""
+                        if let url = URL(string: "\(mentionScheme):\(target.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")") {
+                            links.append((i..<end, url))
+                        }
+                        i = end
+                        continue
+                    }
+                }
+                i += 1
+            }
+        }
         if let detector {
             var offset = 0
             var cursor = text.startIndex
@@ -55,7 +83,12 @@ enum MessageFormat {
                 var piece = AttributedString(String(chars[start..<end]))
                 if !intent.isEmpty { piece.inlinePresentationIntent = intent }
                 if strike { piece.strikethroughStyle = .single }
-                if let url {
+                if let url, url.scheme == mentionScheme {
+                    // A mention: named, not underlined, and a link only to someone else.
+                    piece.inlinePresentationIntent = intent.union(.stronglyEmphasized)
+                    piece.foregroundColor = mentionColor
+                    if url.absoluteString.count > mentionScheme.count + 1 { piece.link = url }
+                } else if let url {
                     piece.link = url
                     piece.underlineStyle = .single
                 }

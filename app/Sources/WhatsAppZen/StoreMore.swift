@@ -20,6 +20,41 @@ struct UserInfo: Decodable, Equatable {
     let blocked: Bool
 }
 
+/// One person's receipt for a message of yours.
+struct ReceiptInfo: Decodable, Identifiable {
+    let jid: String
+    let name: String
+    let read: Bool
+    let ts: Int
+    var id: String { jid }
+}
+
+/// Your own profile as the phone shows it to others.
+struct Profile: Decodable, Equatable {
+    var name: String
+    var about: String
+    var me: String
+}
+
+extension AppStore {
+    func profile() async -> Profile? {
+        try? await Core.call("profile", account: id)
+    }
+
+    func setProfileName(_ name: String) async throws {
+        try await Core.run("set_name", ["text": name], account: id)
+    }
+
+    func setProfileAbout(_ about: String) async throws {
+        try await Core.run("set_about", ["text": about], account: id)
+    }
+
+    /// Sets your profile photo from a picture file; nil removes it.
+    func setProfilePhoto(path: String?) async throws {
+        try await Core.run("set_photo", ["path": path ?? ""], account: id)
+    }
+}
+
 extension AppStore {
     // MARK: Drafts
 

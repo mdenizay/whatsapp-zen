@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS reactions(
     emoji TEXT NOT NULL,
     PRIMARY KEY(chat, msg_id, sender)
 );
+CREATE TABLE IF NOT EXISTS receipts(chat TEXT NOT NULL, msg_id TEXT NOT NULL, jid TEXT NOT NULL,
+    kind INTEGER NOT NULL, ts INTEGER NOT NULL, PRIMARY KEY(chat, msg_id, jid));
 CREATE TABLE IF NOT EXISTS names(jid TEXT PRIMARY KEY, name TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS contacts(jid TEXT PRIMARY KEY, name TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS lids(lid TEXT PRIMARY KEY, pn TEXT NOT NULL);
@@ -94,6 +96,8 @@ pub struct Chat {
     pub pinned: bool,
     pub muted: bool,
     pub ephemeral: i64,
+    /// Unread messages that mention the user.
+    pub unread_mentions: i64,
 }
 
 #[derive(Serialize, Clone, Debug, Default)]
@@ -244,7 +248,8 @@ impl Db {
                     "SELECT c.jid, c.last_ts, c.unread, c.archived, c.pinned,
                             (c.muted_until < 0 OR c.muted_until > strftime('%s','now')), c.ephemeral,
                             COALESCE(m.type,''), COALESCE(m.text,''), COALESCE(m.from_me,0), COALESCE(m.status,0),
-                            COALESCE(m.sender,''), COALESCE(m.deleted,0), COALESCE(m.file_name,'')
+                            COALESCE(m.sender,''), COALESCE(m.deleted,0), COALESCE(m.file_name,''),
+                            CASE WHEN c.unread>0 THEN (SELECT COUNT(*) FROM messages u WHERE u.chat=c.jid AND u.unread=1 AND u.mentions_me=1) ELSE 0 END
                      FROM chats c LEFT JOIN messages m ON m.chat=c.jid
                           AND m.id=(SELECT id FROM messages WHERE chat=c.jid ORDER BY ts DESC, id DESC LIMIT 1)
                      WHERE c.last_ts>0 ORDER BY c.pinned DESC, c.last_ts DESC LIMIT 600",
@@ -263,6 +268,7 @@ impl Db {
                         pinned: r.get(4)?,
                         muted: r.get(5)?,
                         ephemeral: r.get(6)?,
+                        unread_mentions: r.get(14)?,
                         last_type: if deleted { "deleted".into() } else { r.get(7)? },
                         last_text: if deleted { String::new() } else { r.get(8)? },
                         last_from_me: r.get(9)?,
@@ -423,6 +429,14 @@ impl Db {
             return Vec::new();
         };
         let rows = stmt.query_map([TOKEN], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)));
+        rows.map(|rows| rows.flatten().collect()).unwrap_or_default()
+    }
+
+    /// Who has received or read one of the user's messages: (jid, kind, when).
+    pub fn receipts(&self, chat: &str, id: &str) -> Vec<(String, i32, i64)> {
+        let conn = self.conn.lock().unwrap();
+        let Ok(mut stmt) = conn.prepare_cached("SELECT jid, kind, ts FROM receipts WHERE chat=?1 AND msg_id=?2 ORDER BY ts") else { return Vec::new() };
+        let rows = stmt.query_map([chat, id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)));
         rows.map(|rows| rows.flatten().collect()).unwrap_or_default()
     }
 

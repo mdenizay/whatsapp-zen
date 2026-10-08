@@ -505,11 +505,38 @@ final class AppStore: ObservableObject, Identifiable {
     }
 
     func forward(_ message: Message, to chats: [String]) {
+        forward([message], to: chats)
+    }
+
+    /// Forwards several messages, oldest first, to each chat.
+    func forward(_ messages: [Message], to chats: [String]) {
         attempt {
             for chat in chats {
-                let _: Message = try await Core.call("forward", ["chat": message.chat, "id": message.id, "to": chat], account: self.id)
+                for message in messages.sorted(by: { $0.ts < $1.ts }) {
+                    let _: Message = try await Core.call("forward", ["chat": message.chat, "id": message.id, "to": chat], account: self.id)
+                }
             }
         }
+    }
+
+    /// Who has received and read one of your messages.
+    func messageInfo(_ message: Message) async -> [ReceiptInfo] {
+        (try? await Core.call("message_info", ["chat": message.chat, "id": message.id], account: id)) ?? []
+    }
+
+    func markUnread(_ chat: String) {
+        Core.fire("mark_unread", ["chat": chat], account: id)
+    }
+
+    /// Removes the messages of a chat here and on the phone; the chat stays.
+    func clearChat(_ chat: String) {
+        Core.fire("clear_chat", ["chat": chat], account: id)
+    }
+
+    /// Removes a chat and its messages here and on the phone.
+    func deleteChat(_ chat: String) {
+        if selected == chat { open(nil) }
+        Core.fire("delete_chat", ["chat": chat], account: id)
     }
 
     func search(chat: String, text: String) async -> [Message] {
@@ -583,6 +610,21 @@ final class AppStore: ObservableObject, Identifiable {
 
     func groupRename(_ chat: String, name: String) async throws {
         try await Core.run("group_rename", ["chat": chat, "text": name], account: id)
+    }
+
+    func groupDescribe(_ chat: String, text: String) async throws {
+        try await Core.run("group_describe", ["chat": chat, "text": text], account: id)
+    }
+
+    /// Sets the group's photo from a picture file; nil removes it.
+    func groupPhoto(_ chat: String, path: String?) async throws {
+        try await Core.run("group_photo", ["chat": chat, "path": path ?? ""], account: id)
+    }
+
+    /// Makes a group and returns its id.
+    func createGroup(name: String, members: [String]) async throws -> String {
+        let reply: [String: String] = try await Core.call("group_create", ["text": name, "mentions": members], account: id)
+        return reply["jid"] ?? ""
     }
 
     func groupLeave(_ chat: String) async throws {

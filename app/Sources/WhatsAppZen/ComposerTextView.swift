@@ -17,6 +17,10 @@ struct ComposerTextView: NSViewRepresentable {
     /// Each returns whether it used the key.
     var onEscape: () -> Bool = { false }
     var onUpArrow: () -> Bool = { false }
+    var onDownArrow: () -> Bool = { false }
+    var onTab: () -> Bool = { false }
+    /// Asked before ↩ sends; true takes the key (a suggestion was picked).
+    var interceptReturn: () -> Bool = { false }
 
     static let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
 
@@ -39,6 +43,14 @@ struct ComposerTextView: NSViewRepresentable {
         textView.textColor = .labelColor
         textView.insertionPointColor = NSColor(Theme.accent)
         textView.drawsBackground = false
+        // Spelling as in Mail and Messages; the automatic quotes and dashes
+        // stay off, as they would get into code and markup.
+        textView.isContinuousSpellCheckingEnabled = true
+        textView.isGrammarCheckingEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = NSSpellChecker.isAutomaticSpellingCorrectionEnabled
+        textView.isAutomaticTextReplacementEnabled = NSSpellChecker.isAutomaticTextReplacementEnabled
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
         textView.textContainerInset = .zero
         textView.textContainer?.lineFragmentPadding = 4
         textView.isVerticallyResizable = true
@@ -127,12 +139,17 @@ struct ComposerTextView: NSViewRepresentable {
             switch selector {
             case #selector(NSResponder.insertNewline(_:)):
                 // ⇧↩ / ⌥↩ never get here; see PlaceholderTextView.keyDown.
+                if parent.interceptReturn() { return true }
                 parent.onSubmit()
                 return true
             case #selector(NSResponder.cancelOperation(_:)):
                 return parent.onEscape()
             case #selector(NSResponder.moveUp(_:)):
                 return parent.onUpArrow()
+            case #selector(NSResponder.moveDown(_:)):
+                return parent.onDownArrow()
+            case #selector(NSResponder.insertTab(_:)):
+                return parent.onTab()
             default:
                 return false
             }

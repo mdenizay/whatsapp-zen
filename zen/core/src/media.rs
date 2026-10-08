@@ -88,6 +88,20 @@ pub fn jpeg_thumb(data: &[u8], max: u32) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// A picture as a profile photo wants it: square (the middle of it) and
+/// `side` pixels, as a JPEG.
+pub fn square_jpeg(data: &[u8], side: u32) -> Option<Vec<u8>> {
+    let picture = image::load_from_memory(data).ok()?;
+    let (w, h) = (picture.width(), picture.height());
+    let edge = w.min(h);
+    let cut = picture.crop_imm((w - edge) / 2, (h - edge) / 2, edge, edge);
+    let sized = if edge > side { cut.resize_exact(side, side, FilterType::Triangle) } else { cut };
+    let mut out = Vec::new();
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85);
+    sized.to_rgb8().write_with_encoder(encoder).ok()?;
+    Some(out)
+}
+
 /// Turns a square PNG with transparent padding into a WebP sticker. The
 /// encoder is lossless, so a photo can come out large; the size is stepped
 /// down until the sticker is light enough to be accepted everywhere.

@@ -38,6 +38,8 @@ struct Chat: Decodable, Identifiable, Equatable {
     var muted = false
     /// Disappearing-message timer in seconds; 0 when off.
     var ephemeral = 0
+    /// Unread messages that mention you.
+    var unreadMentions = 0
 
     var id: String { jid }
 

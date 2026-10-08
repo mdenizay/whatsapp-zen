@@ -812,9 +812,23 @@ impl Account {
                 if receipt.source.is_from_me {
                     return;
                 }
+                // Who it was, for the message's info: in a group the member, otherwise the other side.
+                let who = if chat.ends_with("@g.us") { self.pn(&receipt.source.sender).await } else { chat.clone() };
+                let kind = match receipt.r#type {
+                    ReceiptType::Read => status::READ,
+                    ReceiptType::Played => status::READ + 1,
+                    _ => status::DELIVERED,
+                };
+                let at = receipt.timestamp.timestamp();
                 let changed = self.db.write(|w| {
                     receipt.message_ids.iter().fold(0, |n, id| {
                         let id: &str = id.as_ref();
+                        w.exec(
+                            "INSERT INTO receipts(chat,msg_id,jid,kind,ts) SELECT ?1,?2,?3,?4,?5
+                                 WHERE EXISTS(SELECT 1 FROM messages WHERE chat=?1 AND id=?2 AND from_me=1)
+                             ON CONFLICT(chat,msg_id,jid) DO UPDATE SET kind=MAX(kind, excluded.kind), ts=CASE WHEN excluded.kind>kind THEN excluded.ts ELSE ts END",
+                            &[&chat, &id, &who, &kind, &at],
+                        );
                         n + w.exec("UPDATE messages SET status=?3 WHERE chat=?1 AND id=?2 AND from_me=1 AND status>=0 AND status<?3", &[&chat, &id, &to])
                     })
                 });

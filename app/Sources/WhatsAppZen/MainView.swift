@@ -214,6 +214,9 @@ struct Sidebar: View {
     @State private var hits: [Message] = []
     @State private var filter = ChatFilter.all
     @State private var listEditor: ListEditorTarget?
+    /// A chat about to be emptied or removed, pending confirmation.
+    @State private var clearing: Chat?
+    @State private var deleting: Chat?
     @ObservedObject private var prefs = Prefs.shared
     /// How many chats the list currently holds rows for.
     @State private var shown = Sidebar.page
@@ -275,13 +278,35 @@ struct Sidebar: View {
                         }
                         if chat.unread > 0 {
                             Button(L("Mark as Read"), systemImage: "checkmark.circle") { store.markRead(chat.jid) }
+                        } else {
+                            Button(L("Mark as Unread"), systemImage: "circle.fill") { store.markUnread(chat.jid) }
                         }
+                        Divider()
+                        Button(L("Clear Messages…"), systemImage: "eraser") { clearing = chat }
+                        Button(L("Delete Chat…"), systemImage: "trash", role: .destructive) { deleting = chat }
                     }
             }
             if chats.count > shown {
                 Color.clear.frame(height: 1)
                     .onAppear { shown += Self.page }
             }
+            Color.clear.frame(height: 0)
+                .confirmationDialog(L("Clear all messages in “%@”?", clearing?.name ?? ""), isPresented: Binding(get: { clearing != nil }, set: { if !$0 { clearing = nil } })) {
+                    Button(L("Clear Messages"), role: .destructive) {
+                        if let clearing { store.clearChat(clearing.jid) }
+                        clearing = nil
+                    }
+                } message: {
+                    Text(L("The messages are removed on this Mac and on your phone. The chat stays."))
+                }
+                .confirmationDialog(L("Delete the chat “%@”?", deleting?.name ?? ""), isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
+                    Button(L("Delete Chat"), role: .destructive) {
+                        if let deleting { store.deleteChat(deleting.jid) }
+                        deleting = nil
+                    }
+                } message: {
+                    Text(L("The chat and its messages are removed on this Mac and on your phone."))
+                }
             if !hits.isEmpty {
                 Section(L("Messages")) {
                     ForEach(hits) { hit in
@@ -414,6 +439,11 @@ struct ChatRow: View {
                         Text(chat.preview).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 4)
+                    if chat.unreadMentions > 0 {
+                        // Someone mentioned you in what is unread.
+                        Text("@").font(.caption2.weight(.bold)).foregroundStyle(.white)
+                            .frame(width: 19, height: 19).background(Theme.accent, in: Circle())
+                    }
                     if chat.unread > 0 { UnreadBadge(count: chat.unread).opacity(chat.muted ? 0.55 : 1) }
                 }
                 .font(.callout)
@@ -437,6 +467,7 @@ struct ChatView: View {
     /// Whether the first scroll to the newest message has happened.
     @State private var settled = false
     @State private var forwarding: Message?
+    @State private var forwardingMany: [Message] = []
     @State private var searching = false
     @State private var showingStarred = false
     /// WA_INFO (demo snapshots) starts with the info sheet open.
@@ -641,7 +672,8 @@ struct ChatView: View {
                 }
             }
         }
-        .sheet(item: $forwarding) { ForwardSheet(message: $0) }
+        .sheet(item: $forwarding) { ForwardSheet(messages: [$0]) }
+        .sheet(isPresented: Binding(get: { !forwardingMany.isEmpty }, set: { if !$0 { forwardingMany = [] } })) { ForwardSheet(messages: forwardingMany) }
         .sheet(isPresented: $showingInfo) { ChatInfoSheet(chat: chat) { showingMembers = true } }
         .sheet(isPresented: $showingMembers) { GroupInfoSheet(chat: chat) }
         .sheet(isPresented: Binding(get: { !store.pendingPhotos.isEmpty }, set: { if !$0 { store.pendingPhotos = [] } })) {
@@ -740,6 +772,14 @@ struct ChatView: View {
             Spacer()
             Button(L("Copy"), systemImage: "doc.on.doc", action: copySelected)
                 .keyboardShortcut("c")
+            Button(L("Forward"), systemImage: "arrowshape.turn.up.right") {
+                forwardingMany = store.messages.filter { selection?.contains($0.id) == true && !$0.deleted }
+                selection = nil
+            }
+            Button(L("Star"), systemImage: "star") {
+                for message in store.messages where selection?.contains(message.id) == true { store.star(message, true) }
+                selection = nil
+            }
             Button(L("Delete for Me"), systemImage: "trash", role: .destructive) { confirmDeleteSelected = true }
         }
         .buttonStyle(.glass)
@@ -1043,6 +1083,8 @@ struct ComposerBar: View {
     /// Bumped to put the caret in the message field.
     @State private var focusRequest = 0
     @State private var fieldHeight: CGFloat = 16
+    /// The highlighted name among the mention suggestions.
+    @State private var mentionIndex = 0
     /// WA_ATTACH (demo snapshots) starts with the + panel open.
     @State private var attaching = ProcessInfo.processInfo.environment["WA_ATTACH"] != nil
     @StateObject private var recorder = VoiceRecorder()
@@ -1127,10 +1169,21 @@ struct ComposerBar: View {
                             return true
                         },
                         onUpArrow: {
+                            if !mentionMatches.isEmpty {
+                                mentionIndex = (mentionIndex - 1 + mentionMatches.count) % mentionMatches.count
+                                return true
+                            }
                             guard text.isEmpty, editing == nil, let onEditLast else { return false }
                             onEditLast()
                             return true
-                        })
+                        },
+                        onDownArrow: {
+                            guard !mentionMatches.isEmpty else { return false }
+                            mentionIndex = (mentionIndex + 1) % mentionMatches.count
+                            return true
+                        },
+                        onTab: { pickMention() },
+                        interceptReturn: { pickMention() })
                         .frame(height: fieldHeight)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 9)
@@ -1171,6 +1224,23 @@ struct ComposerBar: View {
         .onChange(of: file?.id) { _, _ in focusRequest += 1 }
     }
 
+    /// The members whose names fit what is typed after the "@".
+    private var mentionMatches: [GroupMember] {
+        guard let query = mentionQuery else { return [] }
+        let matches = members.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }.prefix(6)
+        return matches.contains { $0.name == query } ? [] : Array(matches)
+    }
+
+    /// Puts the highlighted suggestion into the text; false when there is none.
+    private func pickMention() -> Bool {
+        let matches = mentionMatches
+        guard !matches.isEmpty, let at = text.lastIndex(of: "@") else { return false }
+        let member = matches[min(mentionIndex, matches.count - 1)]
+        text = String(text[..<at]) + "@\(member.name) "
+        mentionIndex = 0
+        return true
+    }
+
     /// The name being typed after an "@" at the end of the text, if any.
     private var mentionQuery: String? {
         guard !members.isEmpty, let at = text.lastIndex(of: "@") else { return nil }
@@ -1181,29 +1251,33 @@ struct ComposerBar: View {
     }
 
     @ViewBuilder private var mentionSuggestions: some View {
-        if let query = mentionQuery {
-            let matches = members.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }.prefix(5)
-            if !matches.isEmpty, !matches.contains(where: { $0.name == query }) {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(matches)) { member in
-                        Button {
-                            if let at = text.lastIndex(of: "@") {
-                                text = String(text[..<at]) + "@\(member.name) "
-                            }
-                        } label: {
-                            HStack(spacing: 8) {
-                                AvatarView(jid: member.jid, name: member.name, size: 20)
-                                Text(member.name).lineLimit(1)
-                                Spacer()
-                            }
-                            .padding(.horizontal, 12).padding(.vertical, 4)
-                            .contentShape(Rectangle())
+        let matches = mentionMatches
+        if !matches.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(matches.enumerated()), id: \.element.id) { position, member in
+                    let current = position == min(mentionIndex, matches.count - 1)
+                    Button {
+                        mentionIndex = position
+                        _ = pickMention()
+                    } label: {
+                        HStack(spacing: 8) {
+                            AvatarView(jid: member.jid, name: member.name, size: 22)
+                            Text(member.name).lineLimit(1)
+                            Spacer()
+                            Text("+" + (member.jid.split(separator: "@").first ?? "")).font(.caption).foregroundStyle(.tertiary)
                         }
-                        .buttonStyle(.plain)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(current ? AnyShapeStyle(Theme.accent.opacity(0.16)) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .onHover { if $0 { mentionIndex = position } }
                 }
-                .padding(.top, 6)
+                Text(L("↑↓ to choose, ⇥ or ↩ to insert")).font(.caption2).foregroundStyle(.tertiary).padding(.horizontal, 12).padding(.top, 2)
             }
+            .padding(.horizontal, 6)
+            .padding(.top, 6)
+            .onChange(of: matches.map(\.jid)) { _, _ in mentionIndex = 0 }
         }
     }
 
@@ -1329,6 +1403,7 @@ struct NewChatView: View {
     @State private var contacts: [Contact] = []
     @State private var query = ""
     @State private var busy = false
+    @State private var creatingGroup = false
 
     private var matches: [Contact] {
         query.isEmpty ? contacts : contacts.filter { $0.name.localizedCaseInsensitiveContains(query) }
@@ -1355,6 +1430,12 @@ struct NewChatView: View {
                 .padding(.horizontal, 14)
                 .padding(.bottom, 10)
             List {
+                if query.isEmpty {
+                    Button { creatingGroup = true } label: {
+                        Label(L("New Group…"), systemImage: "person.2.badge.plus")
+                    }
+                    .buttonStyle(.plain)
+                }
                 if let phone {
                     Button { start(phone: phone) } label: {
                         Label(L("Message +%@", phone), systemImage: "phone.badge.plus")
@@ -1382,6 +1463,9 @@ struct NewChatView: View {
         .frame(width: 400, height: 500)
         .disabled(busy)
         .task { contacts = await store.contacts() }
+        .sheet(isPresented: $creatingGroup) {
+            GroupCreateView(contacts: contacts) { dismiss() }
+        }
     }
 
     private func start(jid: String = "", phone: String = "") {
